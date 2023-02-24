@@ -13,6 +13,7 @@ import json
 
 def normalize(text):
     norm = text.casefold()
+    norm = norm.replace('optimis', 'optimiz')
     return norm
 
 
@@ -41,7 +42,7 @@ def field(ele, data, keyword, kw):
     return label, data
 
 
-def values_to_insert(ele, label, authors, affiliations):
+def values_to_insert(ele, label, authors, affiliations, cites=''):
     try:
         abstract = ele['dc:description']
     except KeyError:
@@ -82,86 +83,88 @@ def values_to_insert(ele, label, authors, affiliations):
            ele['prism:coverDate'], doi, abstract, ele['citedby-count'],
            ','.join(affiliations), ele['subtypeDescription'],
            ele['author-count']['@total'], ','.join(authors), authkeywords,
-           source_id, ele['prism:url'], label, '')
+           source_id, ele['prism:url'], label, cites)
     return val
 
 
-def add_records(mydb, mycursor, all_ids, data, entry, sql, keyword, kw):
-    for ele in entry:
-        ele_eid = int(ele['eid'][7:])
-        if (ele_eid,) not in all_ids['p']:
-            all_ids['p'].add((int(ele['eid'][7:]),))
-            affiliations, val, authors = [], [], []
-            try:
-                for a in ele['affiliation']:
-                    afid = a['afid']
-                    affiliations.append(afid)
-                    if (int(afid),) not in all_ids['aff']:
-                        all_ids['aff'].add((int(afid),))
-                        val.append((afid, a['affilname'],
-                                    a['affiliation-city'],
-                                    a['affiliation-country'],
-                                    a['affiliation-url']))
-                if len(val) > 0:
-                    mycursor.executemany(sql['v'], val)
-                    mydb.commit()
-            except KeyError:
-                pass
-            val = []
-            try:
-                for a in ele['author']:
-                    authid = a['authid']
-                    if authid == '':
-                        authid = data['auth_my']
-                        data['auth_my'] = data['auth_my'] + 1
-                    authors.append(authid)
-                    if (int(authid),) not in all_ids['a']:
-                        all_ids['a'].add((int(authid),))
-                        try:
-                            afids = ','.join([e['$'] for e in a['afid']])
-                        except KeyError:
-                            afids = ''
-                        val.append((authid, a['authname'], a['surname'],
-                                    a['given-name'], a['initials'], afids,
-                                    a['author-url']))
-                if len(val) > 0:
-                    mycursor.executemany(sql['a'], val)
-                    mydb.commit()
-            except KeyError:
-                pass
-            label, data = field(ele, data, keyword, kw)
-            mycursor.execute(sql['p'], values_to_insert(ele, label, authors, affiliations))
-            mydb.commit()
-            # If true, remove from additional table
-            if (ele_eid,) in all_ids['add']:
-                mycursor.execute('SELECT referenced_by FROM additional WHERE id={eid}'.format(eid=ele_eid))
-                refs = str(mycursor.fetchall()[0][0])
-                for ref in refs.split(','):
-                    mycursor.execute('SELECT cites FROM publications WHERE eid={eid}'.format(eid=ref))
-                    cit = str(mycursor.fetchall()[0][0])
-                    if str(ele_eid) in cit.split(','):
-                        continue
-                    elif cit != '':
-                        cit = cit + ',' + str(ele_eid)
-                    else:
-                        cit = str(ele_eid)
-                    mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ref))
-                all_ids['add'].discard((ele_eid,))
-                mycursor.execute('DELETE FROM additional WHERE id={eid}'.format(eid=ele_eid))
+def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
+    ele_eid = int(ele['eid'][7:])
+    if (ele_eid,) not in all_ids['p']:  # Add new record to table publications
+        all_ids['p'].add((int(ele['eid'][7:]),))
+        affiliations, val, authors = [], [], []
+        try:
+            for a in ele['affiliation']:
+                afid = a['afid']
+                affiliations.append(afid)
+                if (int(afid),) not in all_ids['aff']:
+                    all_ids['aff'].add((int(afid),))
+                    val.append((afid, a['affilname'], a['affiliation-city'],
+                                a['affiliation-country'], a['affiliation-url']))
+            if len(val) > 0:
+                mycursor.executemany(sql['v'], val)
                 mydb.commit()
-        else:
-            mycursor.execute('SELECT field FROM publications WHERE eid={eid}'.format(eid=ele_eid))
-            label = str(mycursor.fetchall()[0][0])
-            if kw in label.split(','):
-                continue
-            if label == 'OTHER':
-                label = kw
-                if str(ele['eid']) not in data['eids']:
-                    data['eids'].append(str(ele['eid']))
-            else:
-                label = label + ',' + kw
-            mycursor.execute('UPDATE publications SET field="{label}" WHERE eid={eid}'.format(label=label, eid=ele_eid))
+        except KeyError:
+            pass  # No info on affiliations
+        val = []
+        try:
+            for a in ele['author']:
+                authid = a['authid']
+                if authid == '':
+                    authid = data['auth_my']
+                    data['auth_my'] = data['auth_my'] + 1
+                authors.append(authid)
+                if (int(authid),) not in all_ids['a']:
+                    all_ids['a'].add((int(authid),))
+                    try:
+                        afids = ','.join([e['$'] for e in a['afid']])
+                    except KeyError:
+                        afids = ''  # No affiliation ids given
+                    val.append((authid, a['authname'], a['surname'],
+                                a['given-name'], a['initials'], afids,
+                                a['author-url']))
+            if len(val) > 0:
+                mycursor.executemany(sql['a'], val)
+                mydb.commit()
+        except KeyError:
+            pass  # No info on authors
+        label, data = field(ele, data, keyword, kw)
+        if eid == '':  # Insert document from field of interest
+            mycursor.execute(sql['p'], values_to_insert(ele, label, authors, affiliations))
+        else:  # Insert document that cites a publication in the field
+            mycursor.execute(sql['p'], values_to_insert(ele, label, authors, affiliations, cites=eid[7:]))
+        mydb.commit()
+        # If true, remove from additional table
+        if (ele_eid,) in all_ids['add']:
+            # Get publications that cite the given article
+            mycursor.execute('SELECT referenced_by FROM additional WHERE id={eid}'.format(eid=ele_eid))
+            refs = str(mycursor.fetchall()[0][0])
+            for ref in refs.split(','):
+                mycursor.execute('SELECT cites FROM publications WHERE eid={eid}'.format(eid=ref))
+                cit = str(mycursor.fetchall()[0][0])
+                if str(ele_eid) in cit.split(','):
+                    continue
+                elif cit != '':
+                    cit = cit + ',' + str(ele_eid)
+                else:
+                    cit = str(ele_eid)
+                mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ref))
+            # Remove from additional table
+            all_ids['add'].discard((ele_eid,))
+            mycursor.execute('DELETE FROM additional WHERE id={eid}'.format(eid=ele_eid))
             mydb.commit()
+    elif eid == '':  # Update label for article that's already in the table
+        mycursor.execute('SELECT field FROM publications WHERE eid={eid}'.format(eid=ele_eid))
+        label = str(mycursor.fetchall()[0][0])
+        if kw in label.split(','):
+            return all_ids, data
+        if label == 'OTHER':
+            label = kw
+            if str(ele['eid']) not in data['eids']:
+                data['eids'].append(str(ele['eid']))
+        else:
+            label = label + ',' + kw
+        mycursor.execute('UPDATE publications SET field="{label}" WHERE eid={eid}'.format(label=label, eid=ele_eid))
+        mydb.commit()
     return all_ids, data
 
 
@@ -184,6 +187,9 @@ def main():
     data = json.load(open('save.json'))
     if data['api'] == '':
         data['api'] = 'http://api.elsevier.com/content/search/scopus?query=TITLE-ABS-KEY("{keyword}")&cursor=*&view=COMPLETE'
+        cursor = '*'
+    else:
+        cursor = ''
     # Collect ids
     all_ids = dict()
     mycursor.execute('SELECT eid FROM publications')
@@ -203,27 +209,97 @@ def main():
                  ' author_count, authors, author_keywords, source_id, url,'
                  ' field, cites) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,'
                  ' %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)')}
-    while data['limit'] > 10 and len(data['eids']) > 0:
-        # Get 25 documents from SCOPUS that match the specified keyword
-        response = requests.get(data['api'].format(keyword=keyword), headers=headers)
-        data['limit'] = int(response.headers['X-RateLimit-Remaining'])
-        # Convert response object to json, which is easier to work with
-        response = response.json()['search-results']
-        if data['cursor'] == response['cursor']['@next']:
-            # The above condition is true if we reached the end of result set
-            data['cursor'] = '*'
-            data['api'] = ''
-            break
-        else:
-            data['cursor'] = response['cursor']['@next']
-            for link in response['link']:
-                if link['@ref'] == 'next':
-                    data['api'] = link['@href']
+    while data['limit'] > 10:
         try:
-            all_ids, data = add_records(mydb, mycursor, all_ids, data, response['entry'], sql, keyword, kw)
+            if len(data['eids']) == 0:  # Get documents from SCOPUS that match the specified keyword
+                response = requests.get(data['api'].format(keyword=keyword), headers=headers)
+                try:
+                    # Convert response object to json, which is easier to work with
+                    response = response.json()['search-results']
+                    if cursor == response['cursor']['@next']:
+                        # The above condition is true if we reached the end of result set
+                        cursor = '*'
+                        data['api'] = ''
+                        break
+                    cursor = response['cursor']['@next']
+                    # TODO: optimze this!
+                    for link in response['link']:
+                        if link['@ref'] == 'next':
+                            data['api'] = link['@href']
+                    for ele in response['entry']:
+                        all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
+                except KeyboardInterrupt:
+                    # Convert response object to json, which is easier to work with
+                    response = response.json()['search-results']
+                    if cursor == response['cursor']['@next']:
+                        # The above condition is true if we reached the end of result set
+                        cursor = '*'
+                        data['api'] = ''
+                        break
+                    cursor = response['cursor']['@next']
+                    for link in response['link']:
+                        if link['@ref'] == 'next':
+                            data['api'] = link['@href']
+                    for ele in response['entry']:
+                        all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
+                    break
+                finally:
+                    data['limit'] = int(response.headers['X-RateLimit-Remaining'])
+            else:  # Get the citing articles for the publications in the queue
+                api = 'http://api.elsevier.com/content/search/scopus?query=refeid({eid})&cursor={cursor}&view=COMPLETE&sort=citedby-count'
+                while data['limit'] > 10 and len(data['eids']) > 0:
+                    eid = data['eids'][0]
+                    response = requests.get(api.format(eid=eid, cursor=data['cursor']), headers=headers)
+                    try:
+                        response = response.json()['search-results']
+                        if data['cursor'] == response['cursor']['@next']:
+                            data['cursor'] = '*'
+                            data['eids'].remove(eid)
+                            continue
+                        data['cursor'] = response['cursor']['@next']
+                        for ele in response['entry']:
+                            ele_eid = int(ele['eid'][7:])
+                            if (ele_eid,) in all_ids['p']:
+                                mycursor.execute('SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
+                                cit = str(mycursor.fetchall()[0][0])
+                                if str(eid[7:]) in cit.split(','):
+                                    continue
+                                if cit == '':
+                                    cit = eid[7:]
+                                else:
+                                    cit = cit + ',' + eid[7:]
+                                mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ele_eid))
+                                continue
+                            all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
+                    except KeyboardInterrupt:
+                        response = response.json()['search-results']
+                        if data['cursor'] == response['cursor']['@next']:
+                            data['cursor'] = '*'
+                            data['eids'].remove(eid)
+                            continue
+                        data['cursor'] = response['cursor']['@next']
+                        for ele in response['entry']:
+                            ele_eid = int(ele['eid'][7:])
+                            if (ele_eid,) in all_ids['p']:
+                                mycursor.execute('SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
+                                cit = str(mycursor.fetchall()[0][0])
+                                if str(eid[7:]) in cit.split(','):
+                                    continue
+                                if cit == '':
+                                    cit = eid[7:]
+                                else:
+                                    cit = cit + ',' + eid[7:]
+                                mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ele_eid))
+                                mydb.commit()
+                                continue
+                            all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
+                        with open('save.json', 'w', encoding='utf8') as json_file:
+                            json.dump(data, json_file, ensure_ascii=False)
+                        return
+                    finally:
+                        data['limit'] = int(response.headers['X-RateLimit-Remaining'])
         except KeyboardInterrupt:
-            all_ids, data = add_records(mydb, mycursor, all_ids, data, response['entry'], sql, keyword, kw)
-            break
+            break  # If we haven't fetched the records from SCOPUS yet
     with open('save.json', 'w', encoding='utf8') as json_file:
         json.dump(data, json_file, ensure_ascii=False)
 
