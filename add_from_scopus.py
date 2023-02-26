@@ -9,11 +9,26 @@ Created on Thu Feb 23 21:08:14 2023
 import requests
 import mysql.connector
 import json
+from unidecode import unidecode, UnidecodeError
+
+
+def get_keywords():
+    keyword_to_abbr = dict()
+    f = open('list-of-labels.txt', 'r')
+    line = f.readline()
+    while line != '':
+        ln = line.split(':')
+        keyword_to_abbr[ln[0][:-1]] = ln[1][1:]
+        line = f.readline()
+    f.close()
+    return keyword_to_abbr
 
 
 def normalize(text):
     norm = text.casefold()
+    norm = unidecode(norm, 'ignore')
     norm = norm.replace('optimis', 'optimiz')
+    norm = norm.replace('-', ' ')
     return norm
 
 
@@ -169,8 +184,13 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
 
 
 def main():
-    keyword = 'brain strom optimization'
-    kw = 'BSO'
+    subfields = set('CS', 'FA', 'BA', 'CSS', 'WCA', 'COA', 'WOA', 'CSO', 'BSO', 'FPA')
+    keywords_abbr = get_keywords()
+    for ele in keywords_abbr:
+        if keywords_abbr[ele] not in subfields:
+            keyword = ele
+            kw = keywords_abbr[ele]
+            break
     # Set up a connection to the local database
     mydb = mysql.connector.connect(
         host='localhost',
@@ -186,7 +206,7 @@ def main():
     # Read data from file
     data = json.load(open('save.json'))
     if data['api'] == '':
-        data['api'] = 'http://api.elsevier.com/content/search/scopus?query=TITLE-ABS-KEY("{keyword}")&cursor=*&view=COMPLETE'
+        data['api'] = 'http://api.elsevier.com/content/search/scopus?query=TITLE("{keyword}")%20OR%20ABS("{keyword}")&cursor=*&view=COMPLETE'
         cursor = '*'
     else:
         cursor = ''
@@ -214,6 +234,7 @@ def main():
             if len(data['eids']) == 0:  # Get documents from SCOPUS that match the specified keyword
                 response = requests.get(data['api'].format(keyword=keyword), headers=headers)
                 try:
+                    data['limit'] = int(response.headers['X-RateLimit-Remaining'])
                     # Convert response object to json, which is easier to work with
                     response = response.json()['search-results']
                     if cursor == response['cursor']['@next']:
@@ -222,13 +243,13 @@ def main():
                         data['api'] = ''
                         break
                     cursor = response['cursor']['@next']
-                    # TODO: optimze this!
                     for link in response['link']:
                         if link['@ref'] == 'next':
                             data['api'] = link['@href']
                     for ele in response['entry']:
                         all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
                 except KeyboardInterrupt:
+                    data['limit'] = int(response.headers['X-RateLimit-Remaining'])
                     # Convert response object to json, which is easier to work with
                     response = response.json()['search-results']
                     if cursor == response['cursor']['@next']:
@@ -243,14 +264,13 @@ def main():
                     for ele in response['entry']:
                         all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
                     break
-                finally:
-                    data['limit'] = int(response.headers['X-RateLimit-Remaining'])
             else:  # Get the citing articles for the publications in the queue
                 api = 'http://api.elsevier.com/content/search/scopus?query=refeid({eid})&cursor={cursor}&view=COMPLETE&sort=citedby-count'
                 while data['limit'] > 10 and len(data['eids']) > 0:
                     eid = data['eids'][0]
                     response = requests.get(api.format(eid=eid, cursor=data['cursor']), headers=headers)
                     try:
+                        data['limit'] = int(response.headers['X-RateLimit-Remaining'])
                         response = response.json()['search-results']
                         if data['cursor'] == response['cursor']['@next']:
                             data['cursor'] = '*'
@@ -272,6 +292,7 @@ def main():
                                 continue
                             all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
                     except KeyboardInterrupt:
+                        data['limit'] = int(response.headers['X-RateLimit-Remaining'])
                         response = response.json()['search-results']
                         if data['cursor'] == response['cursor']['@next']:
                             data['cursor'] = '*'
@@ -296,8 +317,6 @@ def main():
                         with open('save.json', 'w', encoding='utf8') as json_file:
                             json.dump(data, json_file, ensure_ascii=False)
                         return
-                    finally:
-                        data['limit'] = int(response.headers['X-RateLimit-Remaining'])
         except KeyboardInterrupt:
             break  # If we haven't fetched the records from SCOPUS yet
     with open('save.json', 'w', encoding='utf8') as json_file:
