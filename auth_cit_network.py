@@ -178,7 +178,7 @@ def heatmap(arr, labels, name):
     return
 
 
-def main():
+def author_citation_graph(subfields):
     mydb = mysql.connector.connect(
         host='localhost',
         user='root',
@@ -186,15 +186,6 @@ def main():
         password='RunTheNum6!',
         auth_plugin='mysql_native_password',
     )
-    fields = ['CS', 'FA', 'BA', 'CSS', 'WCA', 'COA', 'WOA', 'CSO']
-    labels = []
-    for i in range(len(fields)):
-        n_labels = len(labels)
-        for j in range(n_labels):
-            labels.append(labels[j] + ',' + fields[i])
-        labels.append(fields[i])
-    fields.insert(0, 'OTHER')
-    labels.insert(0, 'OTHER')
     mycursor = mydb.cursor()
     mycursor.execute(
         'SELECT eid, field, cites, authors FROM publications')
@@ -209,19 +200,21 @@ def main():
     fields = dict()
     counts = dict()
     empty = dict()
-    for entry in labels:
+    for entry in subfields:
         empty[entry] = 0
     for entry in data_pub:
         work_to_auth[str(entry[0])] = entry[3].split(',')
     for entry in data_add:
         work_to_auth[str(entry[0])] = entry[1].split(',')
+    # Add authors from publications table
     for entry in data_pub:
-        fd = entry[1]
+        fd = entry[1].split(',')
         auth = entry[3].split(',')
         for a in auth:
-            if not(a in counts):
+            if a not in counts:
                 counts[a] = empty.copy()
-            counts[a][fd] = counts[a][fd] + 1
+            for ele in fd:
+                counts[a][ele] = counts[a][ele] + 1
         authors.update(auth)
         try:
             cites = entry[2].split(',')
@@ -236,6 +229,7 @@ def main():
                         else:
                             connections.add((a, w))
                             weights[(a, w)] = 1
+    # Add authors from additional table
     for entry in data_add:
         auth = entry[1].split(',')
         fd = 'OTHER'
@@ -259,15 +253,39 @@ def main():
                         weights[(w, a)] = 1
     mycursor.close()
     mydb.close()
+    # Set labels for the nodes
     for a in counts:
-        fields[a] = max(counts[a], key=counts[a].get)
+        fd = []
+        for f in subfields[1:]:
+            if counts[a][f] > 0:
+                fd.append(f)
+        if len(fd) > 0:
+            fields[a] = ','.join(fd)
+        else:
+            fields[a] = 'OTHER'
+    # Build the graph
     GA = nx.DiGraph()
     GA.add_nodes_from(authors)
     GA.add_edges_from(connections)
     nx.set_edge_attributes(GA, weights, 'weight')
     nx.set_node_attributes(GA, fields, 'field')
+    return GA
 
+
+def main():
+    subfields = ['CS', 'FA', 'BA', 'CSS', 'WCA', 'COA', 'WOA', 'CSO', 'BSO', 'FPA']
+    labels = []
+    for i in range(len(subfields)):
+        n_labels = len(labels)
+        for j in range(n_labels):
+            labels.append(labels[j] + ',' + subfields[i])
+        labels.append(subfields[i])
+    subfields.insert(0, 'OTHER')
+    labels.insert(0, 'OTHER')
+
+    GA = author_citation_graph(subfields)
     e_to, e_from, e_w = to_from_w_labels(GA, labels)
+    # Remove intersections of subfields with no authors within
     for lb in labels.copy():
         if e_to[lb] + e_from[lb] == 0:
             labels.remove(lb)
@@ -277,6 +295,7 @@ def main():
                 e_w.pop((i, lb))
                 e_w.pop((lb, i))
     n_labels = len(labels)
+
     # Calculate array for incoming citations.
     arr2 = np.empty((n_labels, n_labels), dtype=float)
     for i in range(n_labels):
@@ -286,13 +305,16 @@ def main():
                 arr2[i, j] = e_w[(labels[j], labels[i])] / n
             except ZeroDivisionError:
                 arr2[i, j] = n
+    # Save array as heatmap
     heatmap(arr=arr2, labels=labels, name='Incoming')
+
     # Calculate array for outgoing citations.
     arr1 = np.empty((n_labels, n_labels), dtype=float)
     for i in range(n_labels):
         n = e_from[labels[i]]
         for j in range(n_labels):
             arr1[i, j] = e_w[(labels[i], labels[j])] / n
+    # Save array as heatmap
     heatmap(arr=arr1, labels=labels, name='Outgoing')
 
     deg_out, deg_in = props_per_cpt(GA, labels)
