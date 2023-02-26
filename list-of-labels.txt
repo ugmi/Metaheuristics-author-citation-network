@@ -1,1 +1,20 @@
-ant colony optimization : ACO
+chemical reaction optimization : CRO
+firework algorithm : FWA
+society and civilization algorithm : SCA
+moth flame optimization : MFO
+group search optimizer : GSO
+marriage in honey bees optimization : MBO
+ant lion optimizer : ALO
+fruit fly optimization algorithm : FOA
+glowworm swarm optimization : GwSO
+big bang big crunch : BBBC
+krill herd optimization : KH
+imperialist competitive algorithm : ICA
+bees algorithm : BeA
+grey wolf optimizer : GWO
+shuffled frog leaping algorithm : SFLA
+teacher learning based optimization : TLBO
+invasive weed optimization : IWO
+bacterial foraging optimization : BFO
+gravitational search algorithm : GSA
+biogeography based optimizer : BBO
