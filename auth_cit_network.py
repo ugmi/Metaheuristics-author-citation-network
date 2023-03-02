@@ -58,10 +58,12 @@ def print_table(data, labels):
             info[key]['stdv'] = 0
         info[key]['total'] = sum(data[key])
         info[key]['size'] = len(data[key])
-    # Print table.
+    # Print table to file.
+    f = open('table.txt', 'w')
     tb = pd.DataFrame(data=info)
-    print(tabulate(tb.transpose(), tablefmt='fancy_grid', floatfmt=".3f",
-                   headers=['subfield', 'avg', 'stdev', 'total', 'size']))
+    f.write(tabulate(tb.transpose(), tablefmt='fancy_grid', floatfmt=".3f",
+                     headers=['subfield', 'avg', 'stdev', 'total', 'size']))
+    f.close()
 
 
 def props_per_cpt(G, labels):
@@ -174,7 +176,7 @@ def heatmap(arr, labels, name):
             plt.annotate(
                 str(round(arr[i, j], 2)), xy=(j+0.25, i+0.25), color=color)
     plt.title(name)
-    plt.savefig(fname=name, format='svg')
+    # plt.savefig(fname=name, format='svg')
     return
 
 
@@ -206,7 +208,7 @@ def author_citation_graph(subfields):
         work_to_auth[str(entry[0])] = entry[3].split(',')
     for entry in data_add:
         work_to_auth[str(entry[0])] = entry[1].split(',')
-    # Add authors from publications table
+    # Add authors from publications table.
     for entry in data_pub:
         fd = entry[1].split(',')
         auth = entry[3].split(',')
@@ -229,7 +231,7 @@ def author_citation_graph(subfields):
                         else:
                             connections.add((a, w))
                             weights[(a, w)] = 1
-    # Add authors from additional table
+    # Add authors from additional table.
     for entry in data_add:
         auth = entry[1].split(',')
         fd = 'OTHER'
@@ -253,17 +255,18 @@ def author_citation_graph(subfields):
                         weights[(w, a)] = 1
     mycursor.close()
     mydb.close()
-    # Set labels for the nodes
+    subfields.discard('OTHER')
+    # Set labels for the nodes.
     for a in counts:
         fd = []
-        for f in subfields[1:]:
+        for f in subfields:
             if counts[a][f] > 0:
                 fd.append(f)
         if len(fd) > 0:
             fields[a] = ','.join(fd)
         else:
             fields[a] = 'OTHER'
-    # Build the graph
+    # Build the graph.
     GA = nx.DiGraph()
     GA.add_nodes_from(authors)
     GA.add_edges_from(connections)
@@ -273,19 +276,27 @@ def author_citation_graph(subfields):
 
 
 def main():
-    subfields = ['CS', 'FA', 'BA', 'CSS', 'WCA', 'COA', 'WOA', 'CSO', 'BSO', 'FPA']
+    keyword_to_abbr = dict()
+    f = open('added_keywords.txt', 'r')
+    line = f.readline()
+    while line != '':
+        ln = line.split(':')
+        keyword_to_abbr[ln[0][:-1]] = ln[1][1:-1]
+        line = f.readline()
+    f.close()
+    subfields = set(keyword_to_abbr.items())
     labels = []
-    for i in range(len(subfields)):
+    for field in subfields:
         n_labels = len(labels)
         for j in range(n_labels):
-            labels.append(labels[j] + ',' + subfields[i])
-        labels.append(subfields[i])
-    subfields.insert(0, 'OTHER')
+            labels.append(labels[j] + ',' + field)
+        labels.append(field)
+    subfields.add('OTHER')
     labels.insert(0, 'OTHER')
 
     GA = author_citation_graph(subfields)
     e_to, e_from, e_w = to_from_w_labels(GA, labels)
-    # Remove intersections of subfields with no authors within
+    # Remove intersections of subfields with no authors within.
     for lb in labels.copy():
         if e_to[lb] + e_from[lb] == 0:
             labels.remove(lb)
@@ -305,7 +316,7 @@ def main():
                 arr2[i, j] = e_w[(labels[j], labels[i])] / n
             except ZeroDivisionError:
                 arr2[i, j] = n
-    # Save array as heatmap
+    # Save array as heatmap.
     heatmap(arr=arr2, labels=labels, name='Incoming')
 
     # Calculate array for outgoing citations.
@@ -314,15 +325,13 @@ def main():
         n = e_from[labels[i]]
         for j in range(n_labels):
             arr1[i, j] = e_w[(labels[i], labels[j])] / n
-    # Save array as heatmap
+    # Save array as heatmap.
     heatmap(arr=arr1, labels=labels, name='Outgoing')
 
     deg_out, deg_in = props_per_cpt(GA, labels)
     graph_stats(GA, name='outdegree')
-    print('Outdegrees in each concept')
-    print_table(deg_out, labels)
+    # print_table(deg_out, labels)
     graph_stats(GA, name='indegree')
-    print('Indegrees in each concept')
     print_table(deg_in, labels)
     return
 
