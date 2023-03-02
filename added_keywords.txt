@@ -1,0 +1,38 @@
+cuckoo search : CS
+firefly algorithm : FA
+firefly optimization algorithm : FA
+firefly optimizer : FA
+bat algorithm : BA
+bat optimization algorithm : BA
+bat inspired optimization: BA
+charged system search : CSS
+water cycle algorithm : WCA
+water cycle optimization algorithm : WCA
+cuckoo optimization algorithm : COA
+cuckoo optimizer : COA
+whale optimization algorithm : WOA
+whale algorithm : WOA
+whale optimizer : WOA
+cat swarm optimization : CSO
+cat swarm optimizer : CSO
+cat swarm algorithm : CSO
+brain storm optimization : BSO
+brain storm optimizer : BSO
+brainstorming optimizer : BSO
+flower pollination algorithm : FPA
+chemical reaction optimization : CRO
+firework algorithm : FWA
+firework optimization algorithm : FWA
+moth flame optimization : MFO
+moth flame optimizer : MFO
+moth flame algorithm : MFO
+group search optimizer : GSO
+group search optimization algorithm : GSO
+marriage in honey bees optimization : MBO
+marriage in honey bees algorithm : MBO
+ant lion optimization algorithm : ALO
+ant lion optimizer : ALO
+fruit fly optimization algorithm : FOA
+fruit fly algorithm : FOA
+glowworm swarm optimization : GwSO
+glowworm swarm algorithm : GwSO
