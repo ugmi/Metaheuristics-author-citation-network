@@ -18,7 +18,7 @@ def get_keywords():
     line = f.readline()
     while line != '':
         ln = line.split(':')
-        keyword_to_abbr[ln[0][:-1]] = ln[1][1:]
+        keyword_to_abbr[ln[0][:-1]] = ln[1][1:-1]
         line = f.readline()
     f.close()
     return keyword_to_abbr
@@ -146,7 +146,7 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
         if eid == '':  # Insert document from field of interest
             mycursor.execute(sql['p'], values_to_insert(ele, label, authors, affiliations))
         else:  # Insert document that cites a publication in the field
-            mycursor.execute(sql['p'], values_to_insert(ele, label, authors, affiliations, cites=eid[7:]))
+            mycursor.execute(sql['p'], values_to_insert(ele, label, authors, affiliations, cites=str(int(eid[7:]))))
         mydb.commit()
         # If true, remove from additional table
         if (ele_eid,) in all_ids['add']:
@@ -184,13 +184,6 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
 
 
 def main():
-    subfields = set('CS', 'FA', 'BA', 'CSS', 'WCA', 'COA', 'WOA', 'CSO', 'BSO', 'FPA')
-    keywords_abbr = get_keywords()
-    for ele in keywords_abbr:
-        if keywords_abbr[ele] not in subfields:
-            keyword = ele
-            kw = keywords_abbr[ele]
-            break
     # Set up a connection to the local database
     mydb = mysql.connector.connect(
         host='localhost',
@@ -229,11 +222,14 @@ def main():
                  ' author_count, authors, author_keywords, source_id, url,'
                  ' field, cites) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,'
                  ' %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)')}
-    while data['limit'] > 10:
-        try:
-            if len(data['eids']) == 0:  # Get documents from SCOPUS that match the specified keyword
-                response = requests.get(data['api'].format(keyword=keyword), headers=headers)
-                try:
+    keywords_abbr = get_keywords()
+    for ele in keywords_abbr.copy():
+        keyword = ele
+        kw = keywords_abbr[ele]
+        while data['limit'] > 10:
+            try:
+                if len(data['eids']) == 0:  # Get documents from SCOPUS that match the specified keyword
+                    response = requests.get(data['api'].format(keyword=keyword), headers=headers)
                     data['limit'] = int(response.headers['X-RateLimit-Remaining'])
                     # Convert response object to json, which is easier to work with
                     response = response.json()['search-results']
@@ -242,85 +238,84 @@ def main():
                         cursor = '*'
                         data['api'] = ''
                         break
-                    cursor = response['cursor']['@next']
-                    for link in response['link']:
-                        if link['@ref'] == 'next':
-                            data['api'] = link['@href']
-                    for ele in response['entry']:
-                        all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
-                except KeyboardInterrupt:
-                    data['limit'] = int(response.headers['X-RateLimit-Remaining'])
-                    # Convert response object to json, which is easier to work with
-                    response = response.json()['search-results']
-                    if cursor == response['cursor']['@next']:
-                        # The above condition is true if we reached the end of result set
-                        cursor = '*'
-                        data['api'] = ''
-                        break
-                    cursor = response['cursor']['@next']
-                    for link in response['link']:
-                        if link['@ref'] == 'next':
-                            data['api'] = link['@href']
-                    for ele in response['entry']:
-                        all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
-                    break
-            else:  # Get the citing articles for the publications in the queue
-                api = 'http://api.elsevier.com/content/search/scopus?query=refeid({eid})&cursor={cursor}&view=COMPLETE&sort=citedby-count'
-                while data['limit'] > 10 and len(data['eids']) > 0:
-                    eid = data['eids'][0]
-                    response = requests.get(api.format(eid=eid, cursor=data['cursor']), headers=headers)
                     try:
-                        data['limit'] = int(response.headers['X-RateLimit-Remaining'])
-                        response = response.json()['search-results']
-                        if data['cursor'] == response['cursor']['@next']:
-                            data['cursor'] = '*'
-                            data['eids'].remove(eid)
-                            continue
-                        data['cursor'] = response['cursor']['@next']
+                        cursor = response['cursor']['@next']
+                        for link in response['link']:
+                            if link['@ref'] == 'next':
+                                data['api'] = link['@href']
                         for ele in response['entry']:
-                            ele_eid = int(ele['eid'][7:])
-                            if (ele_eid,) in all_ids['p']:
-                                mycursor.execute('SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
-                                cit = str(mycursor.fetchall()[0][0])
-                                if str(eid[7:]) in cit.split(','):
-                                    continue
-                                if cit == '':
-                                    cit = eid[7:]
-                                else:
-                                    cit = cit + ',' + eid[7:]
-                                mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ele_eid))
-                                continue
-                            all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
+                            all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
                     except KeyboardInterrupt:
+                        cursor = response['cursor']['@next']
+                        for link in response['link']:
+                            if link['@ref'] == 'next':
+                                data['api'] = link['@href']
+                        for ele in response['entry']:
+                            all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
+                        break
+                else:  # Get the citing articles for the publications in the queue
+                    api = 'http://api.elsevier.com/content/search/scopus?query=refeid({eid})&cursor={cursor}&view=COMPLETE&sort=citedby-count'
+                    while data['limit'] > 10 and len(data['eids']) > 0:
+                        eid = data['eids'][0]
+                        response = requests.get(api.format(eid=eid, cursor=data['cursor']), headers=headers)
                         data['limit'] = int(response.headers['X-RateLimit-Remaining'])
                         response = response.json()['search-results']
                         if data['cursor'] == response['cursor']['@next']:
                             data['cursor'] = '*'
                             data['eids'].remove(eid)
                             continue
-                        data['cursor'] = response['cursor']['@next']
-                        for ele in response['entry']:
-                            ele_eid = int(ele['eid'][7:])
-                            if (ele_eid,) in all_ids['p']:
-                                mycursor.execute('SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
-                                cit = str(mycursor.fetchall()[0][0])
-                                if str(eid[7:]) in cit.split(','):
+                        try:
+                            data['cursor'] = response['cursor']['@next']
+                            for ele in response['entry']:
+                                ele_eid = int(ele['eid'][7:])
+                                if (ele_eid,) in all_ids['p']:
+                                    mycursor.execute('SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
+                                    cit = str(mycursor.fetchall()[0][0])
+                                    if str(int(eid[7:])) in cit.split(','):
+                                        continue
+                                    if cit == '':
+                                        cit = str(int(eid[7:]))
+                                    else:
+                                        cit = cit + ',' + str(int(eid[7:]))
+                                    mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ele_eid))
                                     continue
-                                if cit == '':
-                                    cit = eid[7:]
-                                else:
-                                    cit = cit + ',' + eid[7:]
-                                mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ele_eid))
-                                mydb.commit()
-                                continue
-                            all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
-                        with open('save.json', 'w', encoding='utf8') as json_file:
-                            json.dump(data, json_file, ensure_ascii=False)
-                        return
-        except KeyboardInterrupt:
-            break  # If we haven't fetched the records from SCOPUS yet
+                                all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
+                        except KeyboardInterrupt:
+                            data['cursor'] = response['cursor']['@next']
+                            for ele in response['entry']:
+                                ele_eid = int(ele['eid'][7:])
+                                if (ele_eid,) in all_ids['p']:
+                                    mycursor.execute('SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
+                                    cit = str(mycursor.fetchall()[0][0])
+                                    if str(int(eid[7:])) in cit.split(','):
+                                        continue
+                                    if cit == '':
+                                        cit = str(int(eid[7:]))
+                                    else:
+                                        cit = cit + ',' + str(int(eid[7:]))
+                                    mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=ele_eid))
+                                    mydb.commit()
+                                    continue
+                                all_ids, data = add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
+                            with open('save.json', 'w', encoding='utf8') as json_file:
+                                json.dump(data, json_file, ensure_ascii=False)
+                            f = open('list-of-labels.txt', 'w')
+                            for key in keywords_abbr:
+                                f.write(keyword + ' : ' + kw + '\n')
+                            f.close()
+                            return
+            except KeyboardInterrupt:
+                break  # If we haven't fetched the records from SCOPUS yet
+        f = open('added_keywords.txt', 'a')
+        f.write('\n' + keyword + ' : ' + kw)
+        f.close()
+        keywords_abbr.pop(keyword)
     with open('save.json', 'w', encoding='utf8') as json_file:
         json.dump(data, json_file, ensure_ascii=False)
+    f = open('list-of-labels.txt', 'w')
+    for key in keywords_abbr:
+        f.write(keyword + ' : ' + kw + '\n')
+    f.close()
 
 
 main()
