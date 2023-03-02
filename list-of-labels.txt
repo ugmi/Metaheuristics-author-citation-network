@@ -1,20 +1,32 @@
-chemical reaction optimization : CRO
-firework algorithm : FWA
-society and civilization algorithm : SCA
-moth flame optimization : MFO
-group search optimizer : GSO
-marriage in honey bees optimization : MBO
-ant lion optimizer : ALO
-fruit fly optimization algorithm : FOA
-glowworm swarm optimization : GwSO
 big bang big crunch : BBBC
+big bang algorithm : BBBC
+big bang optimization : BBBC
 krill herd optimization : KH
+krill herd algorithm : KH
 imperialist competitive algorithm : ICA
+imperialist competitive optimization : ICA
 bees algorithm : BeA
+bees optimization algorithm : BeA
 grey wolf optimizer : GWO
+grey wolf algorithm : GWO
+grey wolf optimization algorithm : GWO
 shuffled frog leaping algorithm : SFLA
+shuffled frog leaping optimizer : SFLA
 teacher learning based optimization : TLBO
+teacher learning based algorithm : TLBO
 invasive weed optimization : IWO
+invasive weed algorithm : IWO
 bacterial foraging optimization : BFO
+bacteria foraging optimization : BFO
+bacterial foraging algorithm : BFO
+bacterial optimization : BFO
+bacteria optimization : BFO
+bacterial swarming algorithm : BFO
+bacteria swarming algorithm : BFO
 gravitational search algorithm : GSA
+gravitational interactions optimization : GSA
+gravitational swarm optimizer : GSA
 biogeography based optimizer : BBO
+differential evolution : DE
+particle swarm optimizer : PSO
+particle swarm optimization : PSO
