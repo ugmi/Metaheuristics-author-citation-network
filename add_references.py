@@ -127,7 +127,7 @@ headers = requests.utils.default_headers()
 headers['X-ELS-APIkey'] = 'd6fce2f6c18155e6666a768000ae3280'
 all_ids = dict()
 mycursor = mydb.cursor()
-mycursor.execute('SELECT eid FROM publications WHERE field="FPA"')
+mycursor.execute('SELECT eid FROM publications WHERE field LIKE "%GWO%"')
 all_ids['fa'] = set(mycursor.fetchall())
 mycursor.execute('SELECT eid FROM publications')
 all_ids['all'] = set(mycursor.fetchall())
@@ -149,18 +149,14 @@ for entry in all_ids['fa'].difference(ref_set):
         rdict = xmltodict.parse(response.content)['abstracts-retrieval-response']['references']
     except KeyError:
         continue
+    mycursor.execute('UPDATE publications SET ref_count={n} WHERE eid={eid}'.format(n=int(rdict['@total-references']), eid=entry[0]))
+    mydb.commit()
+    if rdict['@total-references'] == '1':
+        rdict['reference'] = [rdict['reference']]
     try:
-        mycursor.execute('UPDATE publications SET ref_count={n} WHERE eid={eid}'.format(n=int(rdict['@total-references']), eid=entry[0]))
-        mydb.commit()
-        if rdict['@total-references'] == '1':
-            rdict['reference'] = [rdict['reference']]
         for ele in rdict['reference']:
             all_ids, data = add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql)
     except KeyboardInterrupt:
-        mycursor.execute('UPDATE publications SET ref_count={n} WHERE eid={eid}'.format(n=int(rdict['@total-references']), eid=entry[0]))
-        mydb.commit()
-        if rdict['@total-references'] == '1':
-            rdict['reference'] = [rdict['reference']]
         for ele in rdict['reference']:
             all_ids, data = add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql)
         break
