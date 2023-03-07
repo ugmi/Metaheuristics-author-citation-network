@@ -36,3 +36,14 @@ fruit fly optimization algorithm : FOA
 fruit fly algorithm : FOA
 glowworm swarm optimization : GwSO
 glowworm swarm algorithm : GwSO
+big bang big crunch : BBBC
+big bang algorithm : BBBC
+big bang optimization : BBBC
+krill herd optimization : KH
+krill herd algorithm : KH
+imperialist competitive algorithm : ICA
+imperialist competitive optimization : ICA
+bees algorithm : BeA
+bees optimization algorithm : BeA
+grey wolf optimizer : GWO
+grey wolf algorithm : GWO
