@@ -47,3 +47,8 @@ bees algorithm : BeA
 bees optimization algorithm : BeA
 grey wolf optimizer : GWO
 grey wolf algorithm : GWO
+grey wolf optimization : GWO
+shuffled frog leaping algorithm : SFLA
+shuffled frog leaping optimizer : SFLA
+shuffled frog leaping optimization : SFLA
+teacher learning based optimization : TLBO
