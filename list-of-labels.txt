@@ -1,7 +1,3 @@
-teacher learning based algorithm : TLBO
-invasive weed optimization : IWO
-invasive weed algorithm : IWO
-bacterial foraging optimization : BFO
 bacteria foraging optimization : BFO
 bacterial foraging algorithm : BFO
 bacterial optimization : BFO
