@@ -105,6 +105,7 @@ def values_to_insert(ele, label, authors, affiliations, cites=''):
 def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
     ele_eid = int(ele['eid'][7:])
     if (ele_eid,) not in all_ids['p']:  # Add new record to table publications
+        data['newlyadded'] = data['newlyadded'] + 1
         all_ids['p'].add((int(ele['eid'][7:]),))
         affiliations, val, authors = [], [], []
         try:
@@ -174,6 +175,7 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
                 'DELETE FROM additional WHERE id={eid}'.format(eid=ele_eid))
             mydb.commit()
     elif eid == '':  # Update label for article that's already in the table
+        data['indatabase'] = data['indatabase'] + 1
         mycursor.execute(
             'SELECT field FROM publications WHERE eid={eid}'.format(eid=ele_eid))
         label = str(mycursor.fetchall()[0][0])
@@ -238,6 +240,7 @@ def main():
                     x = data['api'].find('cursor')
                     y = data['api'].find('&view')
                     cursor = data['api'][x+7:y]
+                    cursor = cursor.replace('%3D', '=')
                 # Get documents from SCOPUS that match the specified keyword
                 if len(data['eids']) == 0:
                     response = requests.get(data['api'].format(
@@ -246,7 +249,7 @@ def main():
                         response.headers['X-RateLimit-Remaining'])
                     # Convert response object to json, which is easier to work with
                     response = response.json()['search-results']
-                    if cursor == response['cursor']['@next']:
+                    if response['cursor']['@current'] == response['cursor']['@next']:
                         # The above condition is true if we reached the end of result set
                         cursor = '*'
                         data['api'] = ''
@@ -256,9 +259,13 @@ def main():
                         for link in response['link']:
                             if link['@ref'] == 'next':
                                 data['api'] = link['@href']
-                        for ele in response['entry']:
-                            all_ids, data = add_record(
-                                mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
+                        try:
+                            for ele in response['entry']:
+                                all_ids, data = add_record(
+                                    mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
+                        except KeyError:
+                            print(response)
+                            continue
                     except KeyboardInterrupt:
                         cursor = response['cursor']['@next']
                         for link in response['link']:
@@ -266,6 +273,7 @@ def main():
                                 data['api'] = link['@href']
                         with open('save.json', 'w', encoding='utf8') as json_file:
                             json.dump(data, json_file, ensure_ascii=False)
+                        foo = mycursor.fetchall()  # Collect records to avoid raising errors
                         for ele in response['entry']:
                             all_ids, data = add_record(
                                 mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
@@ -292,6 +300,7 @@ def main():
                             for ele in response['entry']:
                                 ele_eid = int(ele['eid'][7:])
                                 if (ele_eid,) in all_ids['p']:
+                                    data['indatabase'] = data['indatabase'] + 1
                                     mycursor.execute(
                                         'SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
                                     cit = str(mycursor.fetchall()[0][0])
@@ -303,10 +312,12 @@ def main():
                                         cit = cit + ',' + str(int(eid[7:]))
                                     mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(
                                         cites=cit, eid=ele_eid))
+                                    mydb.commit()
                                     continue
                                 all_ids, data = add_record(
                                     mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
                         except KeyboardInterrupt:
+                            foo = mycursor.fetchall()  # Collect records to avoid raising errors
                             data['cursor'] = '*'
                             with open('save.json', 'w', encoding='utf8') as json_file:
                                 json.dump(data, json_file, ensure_ascii=False)
@@ -314,6 +325,7 @@ def main():
                             for ele in response['entry']:
                                 ele_eid = int(ele['eid'][7:])
                                 if (ele_eid,) in all_ids['p']:
+                                    data['indatabase'] = data['indatabase'] + 1
                                     mycursor.execute(
                                         'SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
                                     cit = str(mycursor.fetchall()[0][0])
@@ -338,12 +350,11 @@ def main():
         f.write('\n' + keyword + ' : ' + kw)
         f.close()
         keywords_abbr.pop(keyword)
+        f = open('list-of-labels.txt', 'w')
+        for key in keywords_abbr:
+            f.write(keyword + ' : ' + kw + '\n')
+        f.close()
     with open('save.json', 'w', encoding='utf8') as json_file:
         json.dump(data, json_file, ensure_ascii=False)
-    f = open('list-of-labels.txt', 'w')
-    for key in keywords_abbr:
-        f.write(keyword + ' : ' + kw + '\n')
-    f.close()
-
 
 main()
