@@ -52,3 +52,7 @@ shuffled frog leaping algorithm : SFLA
 shuffled frog leaping optimizer : SFLA
 shuffled frog leaping optimization : SFLA
 teacher learning based optimization : TLBO
+teacher learning based algorithm : TLBO
+invasive weed optimization : IWO
+invasive weed algorithm : IWO
+bacterial foraging optimization : BFO
