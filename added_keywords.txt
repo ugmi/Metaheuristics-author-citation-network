@@ -56,3 +56,10 @@ teacher learning based algorithm : TLBO
 invasive weed optimization : IWO
 invasive weed algorithm : IWO
 bacterial foraging optimization : BFO
+bacteria foraging optimization : BFO
+bacterial foraging algorithm : BFO
+bacteria optimization : BFO
+bacterial optimization : BFO
+bacteria swarming algorithm : BFO
+bacterial swarming algorithm : BFO
+gravitational search algorithm : GSA
