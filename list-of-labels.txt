@@ -1,13 +1,6 @@
-bacteria foraging optimization : BFO
-bacterial foraging algorithm : BFO
-bacterial optimization : BFO
-bacteria optimization : BFO
-bacterial swarming algorithm : BFO
-bacteria swarming algorithm : BFO
-gravitational search algorithm : GSA
 gravitational interactions optimization : GSA
 gravitational swarm optimizer : GSA
-biogeography based optimizer : BBO
 differential evolution : DE
+ant colony optimization : ANT
 particle swarm optimizer : PSO
 particle swarm optimization : PSO
