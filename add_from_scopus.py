@@ -352,7 +352,7 @@ def main():
         keywords_abbr.pop(keyword)
         f = open('list-of-labels.txt', 'w')
         for key in keywords_abbr:
-            f.write(keyword + ' : ' + kw + '\n')
+            f.write(key + ' : ' + keywords_abbr[key] + '\n')
         f.close()
     with open('save.json', 'w', encoding='utf8') as json_file:
         json.dump(data, json_file, ensure_ascii=False)
