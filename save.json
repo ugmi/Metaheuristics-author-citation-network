@@ -1,1 +1,1 @@
-{"auth_my": 70395, "limit": 5656, "cursor": "*", "api": "", "eids": []}
+{"indatabase": 108328, "newlyadded": 30733, "auth_my": 120525, "limit": 10, "api": "https://api.elsevier.com/content/search/scopus?cursor=AoJV79FMMjItczIuMC02NDU0OTExOTY4Nw%3D%3D&count=25&query=TITLE%28%22gravitational+search+algorithm%22%29+OR+ABS%28%22gravitational+search+algorithm%22%29&view=COMPLETE", "cursor": "AoJFMjItczIuMC04NTA4NzExODE3NA==", "eids": ["2-s2.0-64549119687"]}
