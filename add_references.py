@@ -14,15 +14,16 @@ import json
 
 def add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql):
     if (int(ele['scopus-id']),) in all_ids['ref']:
+        data['indatabase'] = data['indatabase'] + 1
         mycursor.execute('SELECT referenced_by FROM additional WHERE id={eid}'.format(eid=ele['scopus-id']))
         cit = str(mycursor.fetchall()[0][0])
         if str(entry[0]) in cit.split(','):
             return all_ids, data
         string = cit + ',' + str(entry[0])
         mycursor.execute('UPDATE additional SET referenced_by="{string}" WHERE id={eid}'.format(string=string, eid=ele['scopus-id']))
-        mydb.commit()
     else:
         if (int(ele['scopus-id']),) in all_ids['all']:
+            data['indatabase'] = data['indatabase'] + 1
             mycursor.execute('SELECT cites FROM publications WHERE eid={eid}'.format(eid=entry[0]))
             cit = str(mycursor.fetchall()[0][0])
             if str(ele['scopus-id']) in cit.split(','):
@@ -34,6 +35,7 @@ def add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql):
             mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=entry[0]))
             mydb.commit()
             return all_ids, data
+        data['newlyadded'] = data['newlyadded'] + 1
         all_ids['ref'].add((int(ele['scopus-id']),))
         authors, val = [], []
         try:
@@ -103,7 +105,7 @@ def add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql):
         mycursor.execute(sql['p'], (ele['scopus-id'], title, ele['url'],
                                     ele['type'], ','.join(authors), citedby,
                                     date, doi, source, str(entry[0])))
-        mydb.commit()
+    mydb.commit()
     return all_ids, data
 
 
@@ -121,13 +123,15 @@ sql = {
           ' citedby, date, doi, source, referenced_by) VALUES'
           ' (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)')
     }
-data = json.load(open('save.json'))
 api = 'https://api.elsevier.com/content/abstract/eid/{eid}?view=REF'
 headers = requests.utils.default_headers()
-headers['X-ELS-APIkey'] = 'd6fce2f6c18155e6666a768000ae3280'
+data = json.load(open('headers.json'))
+for head in data:
+    headers[head] = data[head]
+data = json.load(open('save.json'))
 all_ids = dict()
 mycursor = mydb.cursor()
-mycursor.execute('SELECT eid FROM publications WHERE field LIKE "%GWO%"')
+mycursor.execute('SELECT eid FROM publications WHERE field LIKE "%GSA%"')
 all_ids['fa'] = set(mycursor.fetchall())
 mycursor.execute('SELECT eid FROM publications')
 all_ids['all'] = set(mycursor.fetchall())
@@ -157,6 +161,9 @@ for entry in all_ids['fa'].difference(ref_set):
         for ele in rdict['reference']:
             all_ids, data = add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql)
     except KeyboardInterrupt:
+        with open('save.json', 'w', encoding='utf8') as json_file:
+            json.dump(data, json_file, ensure_ascii=False)
+        foo = mycursor.fetchall()  # Collect records to avoid raising errors
         for ele in rdict['reference']:
             all_ids, data = add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql)
         break

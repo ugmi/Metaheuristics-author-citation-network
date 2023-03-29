@@ -205,7 +205,9 @@ def main():
     mycursor = mydb.cursor()
     # Configure headers, set api key and string
     headers = requests.utils.default_headers()
-    headers['X-ELS-APIkey'] = 'd6fce2f6c18155e6666a768000ae3280'
+    data = json.load(open('headers.json'))
+    for head in data:
+        headers[head] = data[head]
     # Read data from file
     data = json.load(open('save.json'))
     # Collect ids
