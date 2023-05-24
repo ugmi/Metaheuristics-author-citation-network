@@ -48,6 +48,9 @@ bees optimization algorithm : BeA
 grey wolf optimizer : GWO
 grey wolf algorithm : GWO
 grey wolf optimization : GWO
+gray wolf optimization : GWO
+gray wolf optimizer : GWO
+gray wolf algorithm : GWO
 shuffled frog leaping algorithm : SFLA
 shuffled frog leaping optimizer : SFLA
 shuffled frog leaping optimization : SFLA
@@ -63,3 +66,9 @@ bacterial optimization : BFO
 bacteria swarming algorithm : BFO
 bacterial swarming algorithm : BFO
 gravitational search algorithm : GSA
+gravitational interactions optimization : GSA
+gravitational swarm optimizer : GSA
+ant colony optimization : ANT
+ant algorithm : ANT
+ant colony system : ANT
+ant system : ANT
