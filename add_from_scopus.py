@@ -8,11 +8,20 @@ Created on Thu Feb 23 21:08:14 2023
 
 import requests
 import mysql.connector
-import json
-from unidecode import unidecode, UnidecodeError
+from json import load, dump
+from unidecode import unidecode
 
 
 def get_keywords():
+    """
+    Read keywords and their abbreviations from the text file.
+
+    Returns
+    -------
+    keyword_to_abbr : dict
+        Dictionary of keywords to their abbreviations.
+
+    """
     keyword_to_abbr = dict()
     f = open('list-of-labels.txt', 'r')
     line = f.readline()
@@ -25,6 +34,20 @@ def get_keywords():
 
 
 def normalize(text):
+    """
+    Generalize the text by removing any non-standard letters or signs.
+
+    Parameters
+    ----------
+    text : string
+        Text to generalize.
+
+    Returns
+    -------
+    norm : string
+        Generalized text.
+
+    """
     norm = text.casefold()
     norm = unidecode(norm, 'ignore')
     norm = norm.replace('optimis', 'optimiz')
@@ -33,6 +56,33 @@ def normalize(text):
 
 
 def field(ele, data, keyword, kw):
+    """
+    Assign a subfield to the given publication.
+
+    We assign the keyword as the label of the publication
+    if the keyword is contained in the title or abstract.
+    Else, set the label to 'OTHER'.
+    Return the label and updated data about the process.
+
+    Parameters
+    ----------
+    ele : dict
+        Dictionary with info about the publication.
+    data : dict
+        Dictionary containing information about current state of the project.
+    keyword : string
+        Keyword string.
+    kw : string
+        Abbreviation of the keyword.
+
+    Returns
+    -------
+    label : string
+        Keyword corresponding to the element.
+    data : dict
+        Updated dictionary.
+
+    """
     try:
         abstract = ele['dc:description']
     except KeyError:
@@ -58,6 +108,28 @@ def field(ele, data, keyword, kw):
 
 
 def values_to_insert(ele, label, authors, affiliations, cites=''):
+    """
+    Compile a tuple of values to insert to the database.
+
+    Parameters
+    ----------
+    ele : dict
+        Dictionary with info about the publication.
+    label : string
+        Label corresponding to the publication.
+    authors : list
+        List of the authors of the publication.
+    affiliations : list
+        List of author affiliations.
+    cites : string, optional
+        Id of the cited publication, if applicable. The default is ''.
+
+    Returns
+    -------
+    val : tuple
+        Values to insert to the database.
+
+    """
     try:
         abstract = ele['dc:description']
     except KeyError:
@@ -94,15 +166,51 @@ def values_to_insert(ele, label, authors, affiliations, cites=''):
         source_id = ele['source-id']
     except KeyError:
         source_id = 0
+    try:
+        authcount = ele['author-count']['@total']
+    except KeyError:
+        authcount = 0
     val = (ele['eid'][7:], title, source, issn, volume, issue,
            ele['prism:coverDate'], doi, abstract, ele['citedby-count'],
            ','.join(affiliations), ele['subtypeDescription'],
-           ele['author-count']['@total'], ','.join(authors), authkeywords,
-           source_id, ele['prism:url'], label, cites)
+           authcount, ','.join(authors), authkeywords, source_id,
+           ele['prism:url'], label, cites)
     return val
 
 
 def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
+    """
+    Insert a row into the database with the required info.
+
+    Parameters
+    ----------
+    mydb : database
+        Connection to the database.
+    mycursor : cursor
+        Cursor connected to the database.
+    all_ids : dict
+        Dictionary of lists of publications, authors, and affiliations.
+    data : dict
+        Dictionary containing information about current state of the project.
+    ele : dict
+        Dictionary with info about the publication.
+    sql : dict
+        Dictionary of strings for inserting rows into the database.
+    keyword : string
+        Keyword string.
+    kw : string
+        Abbreviation of the keyword.
+    eid : string, optional
+        Id of publication if it's not in the database. The default is ''.
+
+    Returns
+    -------
+    all_ids : dict
+        Updated dictionary.
+    data : TYPE
+        Updated dictionary.
+
+    """
     ele_eid = int(ele['eid'][7:])
     if (ele_eid,) not in all_ids['p']:  # Add new record to table publications
         data['newlyadded'] = data['newlyadded'] + 1
@@ -195,21 +303,16 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
 
 def main():
     # Set up a connection to the local database
-    mydb = mysql.connector.connect(
-        host='localhost',
-        user='root',
-        database='trial',
-        password='RunTheNum6!',
-        auth_plugin='mysql_native_password',
-    )
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
     # Configure headers, set api key and string
     headers = requests.utils.default_headers()
-    data = json.load(open('headers.json'))
+    data = load(open('headers.json'))
     for head in data:
         headers[head] = data[head]
     # Read data from file
-    data = json.load(open('save.json'))
+    data = load(open('save.json'))
     # Collect ids
     all_ids = dict()
     mycursor.execute('SELECT eid FROM publications')
@@ -274,7 +377,7 @@ def main():
                             if link['@ref'] == 'next':
                                 data['api'] = link['@href']
                         with open('save.json', 'w', encoding='utf8') as json_file:
-                            json.dump(data, json_file, ensure_ascii=False)
+                            dump(data, json_file, ensure_ascii=False)
                         foo = mycursor.fetchall()  # Collect records to avoid raising errors
                         for ele in response['entry']:
                             all_ids, data = add_record(
@@ -322,7 +425,7 @@ def main():
                             foo = mycursor.fetchall()  # Collect records to avoid raising errors
                             data['cursor'] = '*'
                             with open('save.json', 'w', encoding='utf8') as json_file:
-                                json.dump(data, json_file, ensure_ascii=False)
+                                dump(data, json_file, ensure_ascii=False)
                             data['cursor'] = response['cursor']['@next']
                             for ele in response['entry']:
                                 ele_eid = int(ele['eid'][7:])
@@ -346,7 +449,7 @@ def main():
                             return
             except KeyboardInterrupt:
                 with open('save.json', 'w', encoding='utf8') as json_file:
-                    json.dump(data, json_file, ensure_ascii=False)
+                    dump(data, json_file, ensure_ascii=False)
                 return  # If we haven't fetched the records from SCOPUS yet
         f = open('added_keywords.txt', 'a')
         f.write('\n' + keyword + ' : ' + kw)
@@ -357,6 +460,7 @@ def main():
             f.write(key + ' : ' + keywords_abbr[key] + '\n')
         f.close()
     with open('save.json', 'w', encoding='utf8') as json_file:
-        json.dump(data, json_file, ensure_ascii=False)
+        dump(data, json_file, ensure_ascii=False)
+
 
 main()
