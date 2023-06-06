@@ -9,10 +9,38 @@ Created on Sun Feb 26 16:16:36 2023
 import requests
 import xmltodict
 import mysql.connector
-import json
+from json import load, dump
 
 
 def add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql):
+    """
+    Insert a row to the database (name 'additional').
+
+    Parameters
+    ----------
+    mydb : database
+        Connection to the database.
+    mycursor : cursor
+        Cursor connected to the database.
+    all_ids : dict
+        Dictionary of lists of publications, authors, and affiliations.
+    data : dict
+        Dictionary containing information about current state of the project.
+    ele : dict
+        Dictionary with info about the publication.
+    entry : tuple
+        Tuple containing the id of the referenced publication.
+    sql : dict
+        Dictionary of strings for inserting rows into the database.
+
+    Returns
+    -------
+    all_ids : TYPE
+        DESCRIPTION.
+    data : TYPE
+        DESCRIPTION.
+
+    """
     if (int(ele['scopus-id']),) in all_ids['ref']:
         data['indatabase'] = data['indatabase'] + 1
         mycursor.execute('SELECT referenced_by FROM additional WHERE id={eid}'.format(eid=ele['scopus-id']))
@@ -97,7 +125,10 @@ def add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql):
         except KeyError:
             citedby = 0
         except TypeError:
-            citedby = int(ele['citedby-count'][0]['#text'])
+            try:
+                citedby = int(ele['citedby-count'][0]['#text'])
+            except KeyError:
+                citedby = 0
         try:
             date = ele['prism:coverDate']
         except KeyError:
@@ -109,13 +140,8 @@ def add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql):
     return all_ids, data
 
 
-mydb = mysql.connector.connect(
-    host='localhost',
-    user='root',
-    database='trial',
-    password='RunTheNum6!',
-    auth_plugin='mysql_native_password',
-)
+db_data = load(open('mydb_setup.json'))
+mydb = mysql.connector.connect(**db_data)
 sql = {
     'a': ('INSERT INTO authors (id, authname, surname, given_name,'
           ' initials, afids, url) VALUES (%s, %s, %s, %s, %s, %s, %s)'),
@@ -125,13 +151,13 @@ sql = {
     }
 api = 'https://api.elsevier.com/content/abstract/eid/{eid}?view=REF'
 headers = requests.utils.default_headers()
-data = json.load(open('headers.json'))
+data = load(open('headers.json'))
 for head in data:
     headers[head] = data[head]
-data = json.load(open('save.json'))
+data = load(open('save.json'))
 all_ids = dict()
 mycursor = mydb.cursor()
-mycursor.execute('SELECT eid FROM publications WHERE field LIKE "%GSA%"')
+mycursor.execute('SELECT eid FROM publications WHERE field LIKE "%ANT%"')
 all_ids['fa'] = set(mycursor.fetchall())
 mycursor.execute('SELECT eid FROM publications')
 all_ids['all'] = set(mycursor.fetchall())
@@ -162,10 +188,10 @@ for entry in all_ids['fa'].difference(ref_set):
             all_ids, data = add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql)
     except KeyboardInterrupt:
         with open('save.json', 'w', encoding='utf8') as json_file:
-            json.dump(data, json_file, ensure_ascii=False)
+            dump(data, json_file, ensure_ascii=False)
         foo = mycursor.fetchall()  # Collect records to avoid raising errors
         for ele in rdict['reference']:
             all_ids, data = add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql)
         break
 with open('save.json', 'w', encoding='utf8') as json_file:
-    json.dump(data, json_file, ensure_ascii=False)
+    dump(data, json_file, ensure_ascii=False)
