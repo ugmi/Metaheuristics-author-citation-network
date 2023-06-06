@@ -13,9 +13,30 @@ import matplotlib.pyplot as plt
 from statistics import stdev, mean, mode, StatisticsError
 from tabulate import tabulate
 import pandas as pd
+from json import load
 
 
 def to_from_w_labels(G, labels):
+    """
+    Calculate the number of edges from one subfield to another.
+
+    Parameters
+    ----------
+    G : nx.Graph or nx.DiGraph
+        Graph whose properties we need to describe.
+    labels : list
+        List containing the labels of the subfields.
+
+    Returns
+    -------
+    e_to : dict
+        Dictionary of edge weights to a subfield.
+    e_from : dict
+        Dictionary of edge weights from a subfield.
+    e_w : dict
+        Dictionary of edge weights.
+
+    """
     e_to = dict()
     for lb in labels:
         e_to[lb] = 0
@@ -33,7 +54,7 @@ def to_from_w_labels(G, labels):
     return e_to, e_from, e_w
 
 
-def print_table(data, labels):
+def print_table(data, labels, name='table'):
     """
     Print table with the statistics for each subfield.
 
@@ -41,6 +62,10 @@ def print_table(data, labels):
     ----------
     data : dict
         Dictionary containing entries associated with each subfield.
+    labels : list
+        List containing the labels of subfields.
+    name : string, optional
+        Name of text file to write the table in.
 
     Returns
     -------
@@ -59,7 +84,7 @@ def print_table(data, labels):
         info[key]['total'] = sum(data[key])
         info[key]['size'] = len(data[key])
     # Print table to file.
-    f = open('table.txt', 'w')
+    f = open(name+'.txt', 'w')
     tb = pd.DataFrame(data=info)
     f.write(tabulate(tb.transpose(), tablefmt='fancy_grid', floatfmt=".3f",
                      headers=['subfield', 'avg', 'stdev', 'total', 'size']))
@@ -79,6 +104,8 @@ def props_per_cpt(G, labels):
     ----------
     G : nx.Graph or nx.DiGraph
         Graph whose properties we need to describe.
+    labels : list
+        List containing the labels of subfields.
 
     Returns
     -------
@@ -156,6 +183,8 @@ def heatmap(arr, labels, name):
         Array containing data.
     labels : list
         List of row and column labels.
+    name : string
+        Name of the picture file for the heatmap.
 
     Returns
     -------
@@ -176,18 +205,27 @@ def heatmap(arr, labels, name):
             plt.annotate(
                 str(round(arr[i, j], 2)), xy=(j+0.25, i+0.25), color=color)
     plt.title(name)
-    # plt.savefig(fname=name, format='svg')
+    plt.savefig(fname=name, format='svg')
     return
 
 
 def author_citation_graph(subfields):
-    mydb = mysql.connector.connect(
-        host='localhost',
-        user='root',
-        database='trial',
-        password='RunTheNum6!',
-        auth_plugin='mysql_native_password',
-    )
+    """
+    Generate the author-citation network.
+
+    Parameters
+    ----------
+    subfields : set
+        Set of abbreviated names of subfields.
+
+    Returns
+    -------
+    GA : nx.DiGraph
+        Author-citation network.
+
+    """
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
     mycursor.execute(
         'SELECT eid, field, cites, authors FROM publications')
@@ -237,7 +275,7 @@ def author_citation_graph(subfields):
         fd = 'OTHER'
         auth = entry[1].split(',')
         for a in auth:
-            if not(a in counts):
+            if not (a in counts):
                 counts[a] = empty.copy()
             counts[a][fd] = counts[a][fd] + 1
         authors.update(auth)
@@ -284,7 +322,7 @@ def main():
         keyword_to_abbr[ln[0][:-1]] = ln[1][1:-1]
         line = f.readline()
     f.close()
-    subfields = set(keyword_to_abbr.items())
+    subfields = set(keyword_to_abbr.values())
     labels = []
     for field in subfields:
         n_labels = len(labels)
@@ -317,7 +355,8 @@ def main():
             except ZeroDivisionError:
                 arr2[i, j] = n
     # Save array as heatmap.
-    heatmap(arr=arr2, labels=labels, name='Incoming')
+    if False:
+        heatmap(arr=arr2, labels=labels, name='Incoming')
 
     # Calculate array for outgoing citations.
     arr1 = np.empty((n_labels, n_labels), dtype=float)
@@ -326,13 +365,15 @@ def main():
         for j in range(n_labels):
             arr1[i, j] = e_w[(labels[i], labels[j])] / n
     # Save array as heatmap.
-    heatmap(arr=arr1, labels=labels, name='Outgoing')
+    if False:
+        heatmap(arr=arr1, labels=labels, name='Outgoing')
 
     deg_out, deg_in = props_per_cpt(GA, labels)
     graph_stats(GA, name='outdegree')
-    # print_table(deg_out, labels)
     graph_stats(GA, name='indegree')
-    print_table(deg_in, labels)
+    if False:
+        print_table(deg_in, labels, "table_in")
+        print_table(deg_out, labels, "table_out")
     return
 
 
