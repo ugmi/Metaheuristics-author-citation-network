@@ -284,18 +284,23 @@ def expected_proportions(G, labels, n_iter=5):
     for i in range(n_labels):
         for j in range(n_labels):
             means[i, j] = mean(arr[i, j])
-            sd[i, j] = stdev(arr[i, j])
+            try:
+                sd[i, j] = stdev(arr[i, j])
+            except StatisticsError:
+                sd[i, j] = 0
     return means, sd
 
 
 G, labels = paper_citation_network()
 cdeg_out, cdeg_in, categories = props_per_cpt(G, labels)
-#print_table(cdeg_out, labels, name='out')
-#print_table(cdeg_in, labels, name='in')
-#print([(nm, len(categories[nm])) for nm in categories])
+if False:
+    print_table(cdeg_out, labels, name='out')
+    print_table(cdeg_in, labels, name='in')
+print([(nm, len(categories[nm])) for nm in categories])
 
 # Generate random graph with the same degree distribution.
-D = nx.directed_configuration_model([entr[1] for entr in G.in_degree()], [entr[1] for entr in G.out_degree()], nx.DiGraph())
+D = nx.directed_configuration_model(
+    [entr[1] for entr in G.in_degree()], [entr[1] for entr in G.out_degree()], nx.DiGraph())
 
 edges = [e for e in G.edges()]
 GM = G.copy()  # Graph with no author self-citatioins.
@@ -325,8 +330,8 @@ for i in range(n_labels):
         proportions.append(((labels[i], labels[j]), arr1[i, j]))
 proportions.sort(key=lambda e: e[1], reverse=True)
 
-graph_stats(G, 'outdegree', plot=True)
-graph_stats(G, 'indegree', plot=True)
+graph_stats(G, 'outdegree', plot=False)
+graph_stats(G, 'indegree', plot=False)
 
 if False:
     missing = list()
