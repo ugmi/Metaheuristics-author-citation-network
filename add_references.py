@@ -155,9 +155,12 @@ data = load(open('headers.json'))
 for head in data:
     headers[head] = data[head]
 data = load(open('save.json'))
+data['records_checked'] = 0
+data['newlyadded'] = 0
+data['indatabase'] = 0
 all_ids = dict()
 mycursor = mydb.cursor()
-mycursor.execute('SELECT eid FROM publications WHERE field LIKE "%ANT%"')
+mycursor.execute('SELECT eid FROM publications WHERE field LIKE "%PSO"')
 all_ids['fa'] = set(mycursor.fetchall())
 mycursor.execute('SELECT eid FROM publications')
 all_ids['all'] = set(mycursor.fetchall())
@@ -186,6 +189,7 @@ for entry in all_ids['fa'].difference(ref_set):
     try:
         for ele in rdict['reference']:
             all_ids, data = add_record_additional(mydb, mycursor, all_ids, data, ele, entry, sql)
+            data['records_checked'] = data['records_checked'] + 1
     except KeyboardInterrupt:
         with open('save.json', 'w', encoding='utf8') as json_file:
             dump(data, json_file, ensure_ascii=False)
