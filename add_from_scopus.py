@@ -313,6 +313,9 @@ def main():
         headers[head] = data[head]
     # Read data from file
     data = load(open('save.json'))
+    data['records_checked'] = 0
+    data['newlyadded'] = 0
+    data['indatabase'] = 0
     # Collect ids
     all_ids = dict()
     mycursor.execute('SELECT eid FROM publications')
@@ -350,8 +353,11 @@ def main():
                 if len(data['eids']) == 0:
                     response = requests.get(data['api'].format(
                         keyword=keyword), headers=headers)
-                    data['limit'] = int(
-                        response.headers['X-RateLimit-Remaining'])
+                    try:
+                        data['limit'] = int(
+                            response.headers['X-RateLimit-Remaining'])
+                    except KeyError:
+                        data['limit'] = data['limit'] - 1
                     # Convert response object to json, which is easier to work with
                     response = response.json()['search-results']
                     if response['cursor']['@current'] == response['cursor']['@next']:
@@ -368,6 +374,7 @@ def main():
                             for ele in response['entry']:
                                 all_ids, data = add_record(
                                     mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
+                                data['records_checked'] = data['records_checked'] + 1
                         except KeyError:
                             print(response)
                             continue
@@ -389,8 +396,11 @@ def main():
                         eid = data['eids'][0]
                         response = requests.get(api.format(
                             eid=eid, cursor=data['cursor']), headers=headers)
-                        data['limit'] = int(
-                            response.headers['X-RateLimit-Remaining'])
+                        try:
+                            data['limit'] = int(
+                                response.headers['X-RateLimit-Remaining'])
+                        except KeyError:
+                            data['limit'] = data['limit'] - 1
                         try:
                             response = response.json()['search-results']
                         except KeyError:
@@ -406,6 +416,7 @@ def main():
                                 ele_eid = int(ele['eid'][7:])
                                 if (ele_eid,) in all_ids['p']:
                                     data['indatabase'] = data['indatabase'] + 1
+                                    data['records_checked'] = data['records_checked'] + 1
                                     mycursor.execute(
                                         'SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
                                     cit = str(mycursor.fetchall()[0][0])
@@ -421,6 +432,7 @@ def main():
                                     continue
                                 all_ids, data = add_record(
                                     mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
+                                data['records_checked'] = data['records_checked'] + 1
                         except KeyboardInterrupt:
                             foo = mycursor.fetchall()  # Collect records to avoid raising errors
                             data['cursor'] = '*'
