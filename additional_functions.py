@@ -10,6 +10,7 @@ import mysql.connector
 import requests
 from json import load, dump
 from unidecode import unidecode
+from html import unescape
 
 
 def relabel_indatabase(prev, current):
@@ -77,12 +78,14 @@ def normalize(text):
 
     """
     norm = text.casefold()
+    norm = norm.replace('&amp;', '&')
+    norm = unescape(norm)
     norm = unidecode(norm, 'ignore')
     replacements = {
         ('/', ''), ('?', ''), ('&', ''), ('-', ' '), ('"', ''), ("'", ""),
-        ('!', ''), ('@', ''), ('#', ''), ('$', ''), ('^', ''), ('*', ''),
-        ('=', ''), ('`', ''), (':', ''), (';', ''), ('|', ''), ('~', ''),
-        ('±', ''), ('{', ''), ('}', ''), ('[', ' '), (']', ''), ('\\', ' '),
+        ('!', ''), ('@', ''), ('#', ''), ('$', ''), ('^', ''), ('\\', ' '),
+        ('*', ''), ('=', ''), ('`', ''), (':', ''), (';', ''), ('|', ''),
+        ('~', ''), ('±', ''), ('{', ''), ('}', ''), ('[', ' '), (']', ''),
         ('   ', ' '), ('  ', ' ')
         }
     for old, new in replacements:
@@ -237,20 +240,97 @@ def merge_matching_title():
                                          'eid': ele[3]}
     for ele in titles_pub:
         if ele in titles_add:
-            # Check if other information matches.
+            # TODO: Check if other information matches.
             if titles_add[ele]['doi'] == '':
                 merge_records(mydb, mycursor, titles_pub[ele]['eid'], titles_add[ele]['id'])
 
 
-def title_metadata(title):
-    # TODO: query crossref to get doi based on title.
+def get_initials(given_name):
+    initials = ''
+    for name in given_name.split(' '):
+        if '-' in name:
+            split = name.split('-')
+            if split[0][-1] == '.':
+                initials = initials + split[0] + '-'
+            else:
+                initials = initials + split[0][0] + '.-'
+            if split[1][-1] == '.':
+                initials = initials + split[1]
+            else:
+                initials = initials + split[1][0] + '.'
+        elif name[-1] == '.':
+            initials = initials + name
+        else:
+            initials = initials + name[0] + '.'
+    return initials
+
+
+def get_date(date_parts):
+    if len(date_parts) == 3:
+        date = '-'.join(date_parts)
+        if len(date) < 10:
+            if date[5] != 0 and date[6] == '-':
+                date = date[:5] + '0' + date[5:]
+        if len(date) < 10:
+            date = date[-1] + '0' + date[-1]
+    elif len(date_parts) == 2:
+        date = '-'.join(date_parts) + '-01'
+        if len(date) < 10:
+            date = date[:5] + '0' + date[5:]
+    elif len(date_parts) == 1:
+        date = date_parts + '-01-01'
+    else:
+        date = ''
+    return date
+
+
+def title_metadata(title, authors, date=''):
+    metadata = dict()
+    norm = normalize(title)
     metadata = dict()
     # Update the headers to get into the polite pool.
     headers = requests.utils.default_headers()
     headers['User-Agent'] = headers['User-Agent'] + ' mailto:ugnemmilasiunaite@gmail.com'
-    url = 'https://api.crossref.org/works?query.bibliographic'
-    response = requests.get(url, headers=headers).json()['message']
-    return
+    if date == '':
+        url = 'https://api.crossref.org/works?query.bibliographic="' + title + '"&rows=5'
+    else:
+        url = 'https://api.crossref.org/works?query.bibliographic="' + title + ', ' + date + '"&rows=5'
+    # Get a list of 5 best matching records based on title and/or date.
+    response = requests.get(url, headers=headers).json()['message']['items']
+    for i in range(5):
+        if normalize(response[i]['title'][0]) == norm:
+            # Get info about the authors.
+            metadata['authors'] = dict()
+            for auth in response['author']:
+                temp = {
+                    'surname': auth['family'],
+                    'given_name': auth['given'],
+                    'initials': get_initials(auth['given'])
+                    }
+                authname = auth['family'] + ' ' + temp['initials']
+                metadata['authors'].update({authname: temp})
+            # Check if authors match.
+            for auth in authors:
+                if auth not in metadata['authors']:
+                    # TODO: consider possiblility of switched names.
+                    metadata['authors'] = []
+                    break
+            # Continue to next record if authors do not match.
+            if metadata['authors'] == [] and len(response['author']) != 0:
+                continue
+            metadata['doi'] = response['DOI']
+            metadata['ref_count'] = response['reference-count']
+            metadata['references'] = response['reference']
+            metadata['type'] = response['type']
+            metadata['citedby'] = response['is-referenced-by-count']
+            metadata['author_count'] = len(response['author'])
+            metadata['source'] = response['container-title'] if type(response['container-title']) is str else ';'.join(response['container-title'])
+            metadata['date'] = get_date(response['published']['date-parts'][0])
+            try:
+                metadata['abstract'] = response['abstract']
+            except KeyError:
+                pass
+    return metadata
 
 
 def doi_metadata(doi):
@@ -275,51 +355,25 @@ def doi_metadata(doi):
     url = 'https://api.crossref.org/works/' + doi
     response = requests.get(url, headers=headers).json()['message']
     # Get info about the authors.
-    metadata['authors'] = []
+    metadata['authors'] = dict()
     for auth in response['author']:
-        metadata['authors'].append(
-            {'surname': auth['family'], 'given_name': auth['given']})
-        # Find the initials of the author.
-        initials = ''
-        for name in auth['given'].split(' '):
-            if '-' in name:
-                split = name.split('-')
-                if split[0][-1] == '.':
-                    initials = initials + split[0] + '-'
-                else:
-                    initials = initials + split[0][0] + '.-'
-                if split[1][-1] == '.':
-                    initials = initials + split[1]
-                else:
-                    initials = initials + split[1][0] + '.'
-            elif name[-1] == '.':
-                initials = initials + name
-            else:
-                initials = initials + name[0] + '.'
-        metadata['authors'][-1].update({'initials': initials})
-        authname = auth['family'] + ' ' + metadata['authors'][-1]['initials']
-        metadata['authors'][-1].update({'authname': authname})
+        temp = {
+            'surname': auth['family'],
+            'given_name': auth['given'],
+            'initials': get_initials(auth['given'])
+            }
+        authname = auth['family'] + ' ' + temp['initials']
+        metadata['authors'].update({authname: temp})
     metadata['title'] = response['title'][0] if type(response['title']) is list else response['title']
     metadata['ref_count'] = response['reference-count']
     metadata['references'] = response['reference']
     metadata['type'] = response['type']
-    # Get the publication date.
-    if len(response['published']['date-parts'][0]) == 3:
-        metadata['date'] = '-'.join(response['published']['date-parts'][0])
-        if len(metadata['date']) < 10:
-            if metadata['date'][5] != 0 and metadata['date'][6] == '-':
-                metadata['date'] = metadata['date'][:5] + '0' + metadata['date'][5:]
-        if len(metadata['date']) < 10:
-            metadata['date'] = metadata['date'][-1] + '0' + metadata['date'][-1]
-    elif len(response['published']['date-parts'][0]) == 2:
-        metadata['date'] = '-'.join(response['published']['date-parts'][0]) + '-01'
-        if len(metadata['date']) < 10:
-            metadata['date'] = metadata['date'][:5] + '0' + metadata['date'][5:]
-    elif len(response['published']['date-parts'][0]) == 1:
-        metadata['date'] = response['published']['date-parts'][0] + '-01-01'
-    else:
-        metadata['date'] = ''
-    # TODO: check for abstract.
+    metadata['date'] = get_date(response['published']['date-parts'][0])
+    # Check if there is an abstract.
+    try:
+        metadata['abstract'] = response['abstract']
+    except KeyError:
+        pass
     metadata['citedby'] = response['is-referenced-by-count']
     metadata['author_count'] = len(response['author'])
     metadata['source'] = response['container-title'] if type(response['container-title']) is str else ';'.join(response['container-title'])
