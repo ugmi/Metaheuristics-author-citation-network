@@ -73,6 +73,3 @@ ant algorithm : ANT
 ant colony system : ANT
 ant system : ANT
 differential evolution : DE
-particle swarm optimization : PSO
-particle swarm optimization : PSO
-particle swarm optimization : PSO
