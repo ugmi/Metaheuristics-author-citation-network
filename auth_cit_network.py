@@ -209,7 +209,48 @@ def heatmap(arr, labels, name):
     return
 
 
-def author_citation_graph(subfields):
+def get_data(source):
+    """
+    Collect data into a list of lists from csv file or database.
+
+    Parameters
+    ----------
+    source : str
+        Indicates the data source: csv file or database.
+
+    Raises
+    ------
+    ValueError
+        Indicates incorrect argument value.
+
+    Returns
+    -------
+    publications_data : list
+        Each entry contains a list of information about a record.
+    others_data : list
+        Each entry contains a list of information about a record.
+
+    """
+    if source == 'database':
+        db_data = load(open('mydb_setup.json'))
+        mydb = mysql.connector.connect(**db_data)
+        mycursor = mydb.cursor()
+        mycursor.execute(
+            'SELECT eid, field, cites, authors FROM publications')
+        publications_data = mycursor.fetchall()
+        mycursor.execute(
+            "SELECT id, authors, referenced_by FROM additional")
+        others_data = mycursor.fetchall()
+    elif source == 'csv':
+        # Change the file paths if needed.
+        publications_data = pd.read_csv('publications.csv', sep=',', usecols=['eid', 'field', 'cites', 'authors']).to_json(orient='values')
+        others_data = pd.read_csv('additional.csv', sep=',', usecols=['id', 'authors', 'referenced_by']).to_json(orient='values')
+    else:
+        raise ValueError('argument value not appropriate')
+    return (publications_data, others_data)
+
+
+def author_citation_graph(subfields, source='database'):
     """
     Generate the author-citation network.
 
@@ -217,6 +258,8 @@ def author_citation_graph(subfields):
     ----------
     subfields : set
         Set of abbreviated names of subfields.
+    source : str, optional
+        Indicates the data source. The default is 'database'.
 
     Returns
     -------
@@ -224,15 +267,7 @@ def author_citation_graph(subfields):
         Author-citation network.
 
     """
-    db_data = load(open('mydb_setup.json'))
-    mydb = mysql.connector.connect(**db_data)
-    mycursor = mydb.cursor()
-    mycursor.execute(
-        'SELECT eid, field, cites, authors FROM publications')
-    data_pub = mycursor.fetchall()
-    mycursor.execute(
-        "SELECT id, authors, referenced_by FROM additional")
-    data_add = mycursor.fetchall()
+    data_pub, data_add = get_data(source)
     authors = set()
     connections = set()
     work_to_auth = dict()
@@ -291,8 +326,6 @@ def author_citation_graph(subfields):
                     else:
                         connections.add((w, a))
                         weights[(w, a)] = 1
-    mycursor.close()
-    mydb.close()
     subfields.discard('OTHER')
     # Set labels for the nodes.
     for a in counts:
