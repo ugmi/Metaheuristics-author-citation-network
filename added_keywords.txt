@@ -72,4 +72,8 @@ ant colony optimization : ANT
 ant algorithm : ANT
 ant colony system : ANT
 ant system : ANT
+<<<<<<< HEAD
 differential evolution : DE
+=======
+differential evolution : DE
+>>>>>>> refs/remotes/origin/main
