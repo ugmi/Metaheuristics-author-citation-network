@@ -63,20 +63,7 @@ def rename_dict(labels):
 
 
 def normalize(text):
-    """
-    Generalize the text by removing any non-standard letters or signs.
-
-    Parameters
-    ----------
-    text : string
-        Text to generalize.
-
-    Returns
-    -------
-    norm : string
-        Generalized text.
-
-    """
+    """Return string in lower case and with non-standard letters removed."""
     norm = text.casefold()
     norm = norm.replace('&amp;', '&')
     norm = unescape(norm)
@@ -189,14 +176,7 @@ def merge_records(mydb, mycursor, idp, ida):
 
 
 def merge_matching_doi():
-    """
-    Merge all records with identical doi from the two tables.
-
-    Returns
-    -------
-    None.
-
-    """
+    """Merge all records with identical doi from the two tables."""
     db_data = load(open('mydb_setup.json'))
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
@@ -246,6 +226,7 @@ def merge_matching_title():
 
 
 def get_initials(given_name):
+    """Return initials in one string for a given name."""
     initials = ''
     for name in given_name.split(' '):
         if '-' in name:
@@ -266,6 +247,20 @@ def get_initials(given_name):
 
 
 def get_date(date_parts):
+    """
+    Generate a date string from a list.
+
+    Parameters
+    ----------
+    date_parts : list
+        A list containing the year and/or month and/or day.
+
+    Returns
+    -------
+    date : str
+        Date string.
+
+    """
     if len(date_parts) == 3:
         date = '-'.join(date_parts)
         if len(date) < 10:
@@ -285,6 +280,24 @@ def get_date(date_parts):
 
 
 def title_metadata(title, authors, date=''):
+    """
+    Get the doi and other metadata based on the publication`s title.
+
+    Parameters
+    ----------
+    title : str
+        Title of the publication.
+    authors : dict
+        Dictionary of information about the authors, keyed by authnames.
+    date : str, optional
+        Date of publication. The default is ''.
+
+    Returns
+    -------
+    metadata : dict
+        Information about the publication from crossref.
+
+    """
     metadata = dict()
     norm = normalize(title)
     metadata = dict()
