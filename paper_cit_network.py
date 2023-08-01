@@ -174,9 +174,55 @@ def to_from_w_labels(G, labels):
     return e_to, e_from, e_w
 
 
-def paper_citation_network():
+def get_data(source):
+    """
+    Collect data into a list of lists from csv file or database.
+
+    Parameters
+    ----------
+    source : str
+        Indicates the data source: csv file or database.
+
+    Raises
+    ------
+    ValueError
+        Indicates incorrect argument value.
+
+    Returns
+    -------
+    publications_data : list
+        Each entry contains a list of information about a record.
+    others_data : list
+        Each entry contains a list of information about a record.
+
+    """
+    if source == 'database':
+        db_data = load(open('mydb_setup.json'))
+        mydb = mysql.connector.connect(**db_data)
+        mycursor = mydb.cursor()
+        mycursor.execute(
+            'SELECT eid, field, cites, authors, citedby, ref_count FROM publications')
+        publications_data = mycursor.fetchall()
+        mycursor.execute(
+            "SELECT id, authors, referenced_by FROM additional")
+        others_data = mycursor.fetchall()
+    elif source == 'csv':
+        # Change the file paths if needed.
+        publications_data = pd.read_csv('publications.csv', sep=',', usecols=['eid', 'field', 'cites', 'authors', 'citedby', 'ref_count']).to_json(orient='values')
+        others_data = pd.read_csv('additional.csv', sep=',', usecols=['id', 'authors', 'referenced_by']).to_json(orient='values')
+    else:
+        raise ValueError('argument value not appropriate')
+    return (publications_data, others_data)
+
+
+def paper_citation_network(source='database'):
     """
     Generate the paper-citation network.
+    
+    Parameters
+    ----------
+    source : str, optional
+        Indicates the data source. The default is 'database'.
 
     Returns
     -------
@@ -186,22 +232,17 @@ def paper_citation_network():
         Set of labels of subfields.
 
     """
-    db_data = load(open('mydb_setup.json'))
-    mydb = mysql.connector.connect(**db_data)
-    mycursor = mydb.cursor()
-    mycursor.execute(
-        'SELECT eid, field, cites, authors, citedby, ref_count FROM publications')
-    data = mycursor.fetchall()
-    nodes = [str(int(d[0])) for d in data]
+    data_pub, data_add = get_data(source)
+    nodes = [str(int(d[0])) for d in data_pub]
     edges, fields, citedby, authors, refcount = set(), dict(), dict(), dict(), dict()
-    for entry in data:
+    for entry in data_pub:
         eid = str(int(entry[0]))
         fields[eid] = entry[1]
         authors[eid] = entry[3]
         citedby[eid] = entry[4]
         refcount[eid] = entry[5]
     labels = set(fields.values())
-    for entry in data:
+    for entry in data_pub:
         try:
             cites = entry[2].split(',')
         except AttributeError:
@@ -209,12 +250,7 @@ def paper_citation_network():
         if cites[0] != '':
             for ele in cites:
                 edges.add((str(int(entry[0])), str(int(ele))))
-
-    mycursor.execute('SELECT id, authors, referenced_by FROM additional')
-    data = mycursor.fetchall()
-    mycursor.close()
-    mydb.close()
-    for entry in data:
+    for entry in data_add:
         eid = str(int(entry[0]))
         nodes.append(eid)
         authors[eid] = entry[1]
@@ -223,7 +259,6 @@ def paper_citation_network():
         if cites[0] != '':
             for ele in cites:
                 edges.add((str(int(ele)), eid))
-
     G = nx.DiGraph()
     G.add_nodes_from(nodes)
     G.add_edges_from(edges)
@@ -332,7 +367,7 @@ proportions.sort(key=lambda e: e[1], reverse=True)
 
 graph_stats(G, 'outdegree', plot=False)
 graph_stats(G, 'indegree', plot=False)
-
+# Check for missing data based on the network.
 if False:
     missing = list()
     for g in G:
