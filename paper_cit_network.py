@@ -208,8 +208,8 @@ def get_data(source):
         others_data = mycursor.fetchall()
     elif source == 'csv':
         # Change the file paths if needed.
-        publications_data = pd.read_csv('publications.csv', sep=',', usecols=['eid', 'field', 'cites', 'authors', 'citedby', 'ref_count']).to_json(orient='values')
-        others_data = pd.read_csv('additional.csv', sep=',', usecols=['id', 'authors', 'referenced_by']).to_json(orient='values')
+        publications_data = eval(pd.read_csv('publications.csv', sep=',', usecols=['eid', 'field', 'cites', 'authors', 'citedby', 'ref_count']).to_json(orient='values'))
+        others_data = eval(pd.read_csv('additional.csv', sep=',', usecols=['id', 'authors', 'referenced_by']).to_json(orient='values'))
     else:
         raise ValueError('argument value not appropriate')
     return (publications_data, others_data)
