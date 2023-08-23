@@ -8,13 +8,18 @@ Created on Thu Feb 23 21:08:14 2023
 
 import requests
 import mysql.connector
-from json import load, dump
+from json import load, dump, JSONDecodeError
 from unidecode import unidecode
 
 
 def get_keywords():
     """
     Read keywords and their abbreviations from the text file.
+
+    Example
+    -------
+        'particle swarm optimization : PSO ' in the text file corresponds to
+    the pair {'particle swarm optimization': 'PSO'} in the dictionary.
 
     Returns
     -------
@@ -91,14 +96,14 @@ def field(ele, data, keyword, kw):
         title = ele['dc:title']
     except KeyError:
         title = ''
-    ntitle = normalize(title)
-    if ntitle.find(keyword) != -1:
+    normalized_title = normalize(title)
+    if normalized_title.find(keyword) != -1:
         label = kw
         if ele['eid'] not in data['eids']:
             data['eids'].append(ele['eid'])
     else:
-        norm_abs = normalize(abstract)
-        if norm_abs.find(keyword) != -1:
+        normalized_abstract = normalize(abstract)
+        if normalized_abstract.find(keyword) != -1:
             label = kw
             if ele['eid'] not in data['eids']:
                 data['eids'].append(ele['eid'])
@@ -212,18 +217,20 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
 
     """
     ele_eid = int(ele['eid'][7:])
-    if (ele_eid,) not in all_ids['p']:  # Add new record to table publications
+    if (ele_eid,) not in all_ids['publications']:  # Add new record to table publications
         data['newlyadded'] = data['newlyadded'] + 1
-        all_ids['p'].add((int(ele['eid'][7:]),))
+        all_ids['publications'].add((int(ele['eid'][7:]),))
         affiliations, val, authors = [], [], []
         try:
-            for a in ele['affiliation']:
-                afid = a['afid']
+            for affiliation in ele['affiliation']:
+                afid = affiliation['afid']
                 affiliations.append(afid)
-                if (int(afid),) not in all_ids['aff']:
-                    all_ids['aff'].add((int(afid),))
-                    val.append((afid, a['affilname'], a['affiliation-city'],
-                                a['affiliation-country'], a['affiliation-url']))
+                if (int(afid),) not in all_ids['affiliations']:
+                    all_ids['affiliations'].add((int(afid),))
+                    val.append((afid, affiliation['affilname'],
+                                affiliation['affiliation-city'],
+                                affiliation['affiliation-country'],
+                                affiliation['affiliation-url']))
             if len(val) > 0:
                 mycursor.executemany(sql['v'], val)
                 mydb.commit()
@@ -231,21 +238,21 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
             pass  # No info on affiliations
         val = []
         try:
-            for a in ele['author']:
-                authid = a['authid']
+            for author in ele['author']:
+                authid = author['authid']
                 if authid == '':
                     authid = data['auth_my']
                     data['auth_my'] = data['auth_my'] + 1
                 authors.append(authid)
-                if (int(authid),) not in all_ids['a']:
+                if (int(authid),) not in all_ids['authors']:
                     all_ids['a'].add((int(authid),))
                     try:
-                        afids = ','.join([e['$'] for e in a['afid']])
+                        afids = ','.join([e['$'] for e in author['afid']])
                     except KeyError:
                         afids = ''  # No affiliation ids given
-                    val.append((authid, a['authname'], a['surname'],
-                                a['given-name'], a['initials'], afids,
-                                a['author-url']))
+                    val.append((authid, author['authname'], author['surname'],
+                                author['given-name'], author['initials'],
+                                afids, author['author-url']))
             if len(val) > 0:
                 mycursor.executemany(sql['a'], val)
                 mydb.commit()
@@ -260,32 +267,32 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
                 ele, label, authors, affiliations, cites=str(int(eid[7:]))))
         mydb.commit()
         # If true, remove from additional table
-        if (ele_eid,) in all_ids['add']:
+        if (ele_eid,) in all_ids['others']:
             # Get publications that cite the given article
             mycursor.execute(
-                'SELECT referenced_by FROM additional WHERE id={eid}'.format(eid=ele_eid))
+                f'SELECT referenced_by FROM additional WHERE id={ele_eid}')
             refs = str(mycursor.fetchall()[0][0])
             for ref in refs.split(','):
                 mycursor.execute(
-                    'SELECT cites FROM publications WHERE eid={eid}'.format(eid=ref))
-                cit = str(mycursor.fetchall()[0][0])
-                if str(ele_eid) in cit.split(','):
+                    f'SELECT cites FROM publications WHERE eid={ref}')
+                referenced_articles = str(mycursor.fetchall()[0][0])
+                if str(ele_eid) in referenced_articles.split(','):
                     continue
-                elif cit != '':
-                    cit = cit + ',' + str(ele_eid)
+                elif referenced_articles != '':
+                    referenced_articles = referenced_articles + ',' + str(ele_eid)
                 else:
-                    cit = str(ele_eid)
-                mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(
-                    cites=cit, eid=ref))
+                    referenced_articles = str(ele_eid)
+                mycursor.execute(
+                    f'UPDATE publications SET cites="{referenced_articles}" WHERE eid={ref}')
             # Remove from additional table
-            all_ids['add'].discard((ele_eid,))
+            all_ids['others'].discard((ele_eid,))
             mycursor.execute(
-                'DELETE FROM additional WHERE id={eid}'.format(eid=ele_eid))
+                f'DELETE FROM additional WHERE id={ele_eid}')
             mydb.commit()
     elif eid == '':  # Update label for article that's already in the table
         data['indatabase'] = data['indatabase'] + 1
         mycursor.execute(
-            'SELECT field FROM publications WHERE eid={eid}'.format(eid=ele_eid))
+            f'SELECT field FROM publications WHERE eid={ele_eid}')
         label = str(mycursor.fetchall()[0][0])
         if kw in label.split(','):
             return all_ids, data
@@ -295,8 +302,8 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
                 data['eids'].append(str(ele['eid']))
         else:
             label = label + ',' + kw
-        mycursor.execute('UPDATE publications SET field="{label}" WHERE eid={eid}'.format(
-            label=label, eid=ele_eid))
+        mycursor.execute(
+            f'UPDATE publications SET field="{label}" WHERE eid={ele_eid}')
         mydb.commit()
     return all_ids, data
 
@@ -319,13 +326,13 @@ def main():
     # Collect ids
     all_ids = dict()
     mycursor.execute('SELECT eid FROM publications')
-    all_ids['p'] = set(mycursor.fetchall())
+    all_ids['publications'] = set(mycursor.fetchall())
     mycursor.execute('SELECT id FROM affiliations')
-    all_ids['aff'] = set(mycursor.fetchall())
+    all_ids['affiliations'] = set(mycursor.fetchall())
     mycursor.execute('SELECT id FROM authors')
-    all_ids['a'] = set(mycursor.fetchall())
+    all_ids['authors'] = set(mycursor.fetchall())
     mycursor.execute('SELECT id FROM additional')
-    all_ids['add'] = set(mycursor.fetchall())
+    all_ids['others'] = set(mycursor.fetchall())
     sql = {'a': ('INSERT INTO authors (id, authname, surname, given_name,'
                  ' initials, afids, url) VALUES (%s, %s, %s, %s, %s, %s, %s)'),
            'v': ('INSERT INTO affiliations (id, name, city, country, url)'
@@ -345,6 +352,7 @@ def main():
                     data['api'] = 'http://api.elsevier.com/content/search/scopus?query=TITLE("{keyword}")%20OR%20ABS("{keyword}")&cursor=*&view=COMPLETE'
                     cursor = '*'
                 else:
+                    # Resolve some strange issue with cursors.
                     x = data['api'].find('cursor')
                     y = data['api'].find('&view')
                     cursor = data['api'][x+7:y]
@@ -359,7 +367,14 @@ def main():
                     except KeyError:
                         data['limit'] = data['limit'] - 1
                     # Convert response object to json, which is easier to work with
-                    response = response.json()['search-results']
+                    try:
+                        response = response.json()['search-results']
+                    except JSONDecodeError:
+                        with open('save.json', 'w', encoding='utf8') as json_file:
+                            dump(data, json_file, ensure_ascii=False)
+                        print(response)
+                        print(response.content)
+                        return
                     if response['cursor']['@current'] == response['cursor']['@next']:
                         # The above condition is true if we reached the end of result set
                         cursor = '*'
@@ -406,6 +421,12 @@ def main():
                         except KeyError:
                             data['cursor'] = '*'
                             continue
+                        except JSONDecodeError:
+                            with open('save.json', 'w', encoding='utf8') as json_file:
+                                dump(data, json_file, ensure_ascii=False)
+                            print(response)
+                            print(response.content)
+                            return
                         if data['cursor'] == response['cursor']['@next']:
                             data['cursor'] = '*'
                             data['eids'].remove(eid)
@@ -414,20 +435,20 @@ def main():
                             data['cursor'] = response['cursor']['@next']
                             for ele in response['entry']:
                                 ele_eid = int(ele['eid'][7:])
-                                if (ele_eid,) in all_ids['p']:
+                                if (ele_eid,) in all_ids['publications']:
                                     data['indatabase'] = data['indatabase'] + 1
                                     data['records_checked'] = data['records_checked'] + 1
                                     mycursor.execute(
-                                        'SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
-                                    cit = str(mycursor.fetchall()[0][0])
-                                    if str(int(eid[7:])) in cit.split(','):
+                                        f'SELECT cites from publications WHERE eid={ele_eid}')
+                                    referenced_articles = str(mycursor.fetchall()[0][0])
+                                    if str(int(eid[7:])) in referenced_articles.split(','):
                                         continue
-                                    if cit == '':
-                                        cit = str(int(eid[7:]))
+                                    if referenced_articles == '':
+                                        referenced_articles = str(int(eid[7:]))
                                     else:
-                                        cit = cit + ',' + str(int(eid[7:]))
-                                    mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(
-                                        cites=cit, eid=ele_eid))
+                                        referenced_articles = referenced_articles + ',' + str(int(eid[7:]))
+                                    mycursor.execute(
+                                        f'UPDATE publications SET cites="{referenced_articles}" WHERE eid={ele_eid}')
                                     mydb.commit()
                                     continue
                                 all_ids, data = add_record(
@@ -441,19 +462,19 @@ def main():
                             data['cursor'] = response['cursor']['@next']
                             for ele in response['entry']:
                                 ele_eid = int(ele['eid'][7:])
-                                if (ele_eid,) in all_ids['p']:
+                                if (ele_eid,) in all_ids['publications']:
                                     data['indatabase'] = data['indatabase'] + 1
                                     mycursor.execute(
-                                        'SELECT cites from publications WHERE eid={eid}'.format(eid=ele_eid))
-                                    cit = str(mycursor.fetchall()[0][0])
-                                    if str(int(eid[7:])) in cit.split(','):
+                                        f'SELECT cites from publications WHERE eid={ele_eid}')
+                                    referenced_articles = str(mycursor.fetchall()[0][0])
+                                    if str(int(eid[7:])) in referenced_articles.split(','):
                                         continue
-                                    if cit == '':
-                                        cit = str(int(eid[7:]))
+                                    if referenced_articles == '':
+                                        referenced_articles = str(int(eid[7:]))
                                     else:
-                                        cit = cit + ',' + str(int(eid[7:]))
-                                    mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(
-                                        cites=cit, eid=ele_eid))
+                                        referenced_articles = referenced_articles + ',' + str(int(eid[7:]))
+                                    mycursor.execute(
+                                        f'UPDATE publications SET cites="{referenced_articles}" WHERE eid={ele_eid}')
                                     mydb.commit()
                                     continue
                                 all_ids, data = add_record(

@@ -13,37 +13,41 @@ from unidecode import unidecode
 from html import unescape
 
 
-def relabel_indatabase(prev, current):
+def relabel_indatabase(old, new):
     """
     Relabel the algorithm in the database for all affected records.
 
+    Example: we want to replace old label 'PS' with 'PSO'.
+    Then the field string 'CS,PS' becomes 'CS,PSO'.
+
     Parameters
     ----------
-    prev : string
+    old : string
         Old label.
-    current : string
+    new : string
         New label.
-
-    Returns
-    -------
-    None.
 
     """
     db_data = load(open('mydb_setup.json'))
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
     mycursor.execute(
-        'SELECT eid, field FROM publications WHERE field LIKE "%' + prev + '"')
+        'SELECT eid, field FROM publications WHERE field LIKE "%' + old + '"')
     data = mycursor.fetchall()
     for ele in data:  # Update each record.
-        fields = ele[1].replace(prev, current)
-        mycursor.execute('UPDATE publications SET field="{string}" WHERE eid={eid}'.format(string=fields, eid=ele[0]))
+        fields = ele[1].replace(old, new)
+        mycursor.execute(
+            f'UPDATE publications SET field="{fields}" WHERE eid={ele[0]}')
         mydb.commit()
 
 
 def rename_dict(labels):
     """
     Generate dictionary to relate old and new labels.
+
+    Example
+    -------
+        Argument labels=['HS','CS'] returns {'HS': 'A1', 'CS': 'A2'}.
 
     Parameters
     ----------
@@ -53,7 +57,7 @@ def rename_dict(labels):
     Returns
     -------
     renamed : dict
-        Dictionary where old labels are keys and new labels the corresponding values.
+        Dictionary where old labels - keys, new labels - corresponding values.
 
     """
     renamed = dict()
@@ -65,7 +69,7 @@ def rename_dict(labels):
 def normalize(text):
     """Return string in lower case and with non-standard letters removed."""
     norm = text.casefold()
-    norm = norm.replace('&amp;', '&')
+    norm = norm.replace('&amp;', '&')  # Replace HTML entity '&amp;' with '&'
     norm = unescape(norm)
     norm = unidecode(norm, 'ignore')
     replacements = {
@@ -74,7 +78,7 @@ def normalize(text):
         ('*', ''), ('=', ''), ('`', ''), (':', ''), (';', ''), ('|', ''),
         ('~', ''), ('±', ''), ('{', ''), ('}', ''), ('[', ' '), (']', ''),
         ('   ', ' '), ('  ', ' ')
-        }
+    }
     for old, new in replacements:
         norm = norm.replace(old, new)
     return norm
@@ -102,38 +106,38 @@ def merge_records(mydb, mycursor, idp, ida):
     Exception
         Occurs if the authors of the records do not match.
 
-    Returns
-    -------
-    None.
-
     """
-    mycursor.execute('SELECT authors, author_count FROM publications WHERE eid={eid}'.format(eid=idp))
+    mycursor.execute(
+        f'SELECT authors, author_count FROM publications WHERE eid={idp}')
     info_idp = list(mycursor.fetchall()[0])
-    mycursor.execute('SELECT authors, referenced_by FROM additional WHERE id={eid}'.format(eid=ida))
+    mycursor.execute(
+        f'SELECT authors, referenced_by FROM additional WHERE id={ida}')
     info_ida = list(mycursor.fetchall()[0])
     # Get the information about the authors of publication with id idp.
     info_idp.append(dict())
-    for auth in info_idp[0].split(','):
-        mycursor.execute('SELECT authname, given_name, aka FROM authors WHERE id={aid}'.format(aid=int(auth)))
-        info = mycursor.fetchall()[0]
+    for author in info_idp[0].split(','):
+        mycursor.execute(
+            f'SELECT authname, given_name, aka FROM authors WHERE id={int(author)}')
+        author_info = mycursor.fetchall()[0]
         try:
-            aka = info[2].split()
+            aka = author_info[2].split()
         except AttributeError:
             aka = []
         info_idp[2].update(
-            {normalize(info[0]): (auth, info[1], aka)})
+            {normalize(author_info[0]): (author, author_info[1], aka)})
     # Get the information about the authors of publication with id ida.
     info_ida.append(dict())
-    for auth in info_ida[0].split(','):
-        mycursor.execute('SELECT authname, given_name, aka FROM authors WHERE id={aid}'.format(aid=int(auth)))
-        info = mycursor.fetchall()[0]
+    for author in info_ida[0].split(','):
+        mycursor.execute(
+            f'SELECT authname, given_name, aka FROM authors WHERE id={int(author)}')
+        author_info = mycursor.fetchall()[0]
         try:
-            aka = info[2].split(',')
+            aka = author_info[2].split(',')
         except AttributeError:
             aka = []
         info_ida[2].update(
-            {normalize(info[0]): (auth, info[1], aka)})
-    del info, auth, aka
+            {normalize(author_info[0]): (author, author_info[1], aka)})
+    del author_info, author, aka
     aliases = dict()  # Store ids with corresponding aliases.
     for name in info_ida[2]:
         if name in info_idp[2]:
@@ -155,23 +159,24 @@ def merge_records(mydb, mycursor, idp, ida):
         raise Exception('Authors don`t match')
     # Merge authors.
     for ala in aliases:
-        mycursor.execute('UPDATE authors SET aka="{aka}" WHERE id={aid}'.format(aka=','.join(aliases[ala]), aid=int(ala)))
+        mycursor.execute(f'UPDATE authors SET aka="{",".join(aliases[ala])}" WHERE id={int(ala)}')
     mydb.commit()
     # Update related records.
     for ref in info_ida[1].split(','):
-        mycursor.execute('SELECT cites FROM publications WHERE eid={eid}'.format(eid=int(ref)))
-        cit = str(mycursor.fetchall()[0][0])
-        if str(idp) in cit.split(','):
+        mycursor.execute(
+            f'SELECT cites FROM publications WHERE eid={int(ref)}')
+        referenced_articles = str(mycursor.fetchall()[0][0])
+        if str(idp) in referenced_articles.split(','):
             continue
-        elif cit.split(',')[0] == '':
-            cit = str(idp)
+        elif referenced_articles.split(',')[0] == '':
+            referenced_articles = str(idp)
         else:
-            cit = cit + ',' + str(idp)
-        mycursor.execute('UPDATE publications SET cites="{cites}" WHERE eid={eid}'.format(cites=cit, eid=int(ref)))
+            referenced_articles = referenced_articles + ',' + str(idp)
+        mycursor.execute(
+            f'UPDATE publications SET cites="{referenced_articles}" WHERE eid={int(ref)}')
         mydb.commit()
     # Remove the other record.
-    mycursor.execute(
-        'DELETE FROM additional WHERE id={eid}'.format(eid=ida))
+    mycursor.execute(f'DELETE FROM additional WHERE id={ida}')
     mydb.commit()
 
 
@@ -181,14 +186,15 @@ def merge_matching_doi():
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
     mycursor.execute('SELECT doi FROM additional')
-    additional = mycursor.fetchall()
+    other_dois = mycursor.fetchall()
     mycursor.execute('SELECT doi FROM publications')
-    publications = mycursor.fetchall()
-    for doi in additional:
-        if doi in publications:
-            mycursor.execute('SELECT eid from publications WHERE doi="{s}"'.format(s=doi[0]))
+    publication_dois = mycursor.fetchall()
+    for doi in other_dois:
+        if doi in publication_dois:
+            mycursor.execute(
+                f'SELECT eid from publications WHERE doi="{doi[0]}"')
             idp = mycursor.fetchall()[0][0]
-            mycursor.execute('SELECT id from additional WHERE doi="{s}"'.format(s=doi[0]))
+            mycursor.execute(f'SELECT id from additional WHERE doi="{doi[0]}"')
             ida = mycursor.fetchall()[0][0]
             merge_records(mydb, mycursor, idp, ida)
 
@@ -198,31 +204,28 @@ def merge_matching_title():
     Merge all records with identical titles from the two tables.
 
     Only merges the records if one of the records has no associated doi.
-
-    Returns
-    -------
-    None.
-
     """
     db_data = load(open('mydb_setup.json'))
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
     mycursor.execute('SELECT title, date, source, id, doi FROM additional')
-    additional = mycursor.fetchall()
+    info_other = mycursor.fetchall()
     mycursor.execute('SELECT title, date, source, eid FROM publications')
-    publications = mycursor.fetchall()
-    titles_pub, titles_add = dict(), dict()
-    for ele in additional:
-        titles_add[normalize(ele[1])] = {'date': str(ele[1]), 'source': ele[2],
+    info_publications = mycursor.fetchall()
+    publication_titles, other_titles = dict(), dict()
+    for ele in info_other:
+        other_titles[normalize(ele[1])] = {'date': str(ele[1]), 'source': ele[2],
                                          'id': ele[3], 'doi': ele[4]}
-    for ele in publications:
-        titles_pub[normalize(ele[1])] = {'date': str(ele[1]), 'source': ele[2],
+    for ele in info_publications:
+        publication_titles[normalize(ele[1])] = {'date': str(ele[1]), 'source': ele[2],
                                          'eid': ele[3]}
-    for ele in titles_pub:
-        if ele in titles_add:
+    for ele in publication_titles:
+        if ele in other_titles:
             # TODO: Check if other information matches.
-            if titles_add[ele]['doi'] == '':
-                merge_records(mydb, mycursor, titles_pub[ele]['eid'], titles_add[ele]['id'])
+            if other_titles[ele]['doi'] == '':
+                # Check if dates match.
+                if other_titles[ele]['date'] == 'None' or other_titles[ele]['date'][:-3] == publication_titles[ele]['date'][:-3]:
+                    merge_records(mydb, mycursor, publication_titles[ele]['eid'], other_titles[ele]['id'])
 
 
 def get_initials(given_name):
@@ -250,6 +253,12 @@ def get_date(date_parts):
     """
     Generate a date string from a list.
 
+    Examples
+    --------
+        ['2020', '12', '24'] -> '2020-12-24',
+        ['2020', '12'] -> '2020-12-01',
+        ['2020'] -> '2020-01-01'.
+
     Parameters
     ----------
     date_parts : list
@@ -264,7 +273,7 @@ def get_date(date_parts):
     if len(date_parts) == 3:
         date = '-'.join(date_parts)
         if len(date) < 10:
-            if date[5] != 0 and date[6] == '-':
+            if date[5] != '0' and date[6] == '-':
                 date = date[:5] + '0' + date[5:]
         if len(date) < 10:
             date = date[-1] + '0' + date[-1]
@@ -273,7 +282,7 @@ def get_date(date_parts):
         if len(date) < 10:
             date = date[:5] + '0' + date[5:]
     elif len(date_parts) == 1:
-        date = date_parts + '-01-01'
+        date = date_parts[0] + '-01-01'
     else:
         date = ''
     return date
@@ -314,17 +323,17 @@ def title_metadata(title, authors, date=''):
         if normalize(response[i]['title'][0]) == norm:
             # Get info about the authors.
             metadata['authors'] = dict()
-            for auth in response['author']:
+            for author in response['author']:
                 temp = {
-                    'surname': auth['family'],
-                    'given_name': auth['given'],
-                    'initials': get_initials(auth['given'])
+                    'surname': author['family'],
+                    'given_name': author['given'],
+                    'initials': get_initials(author['given'])
                     }
-                authname = auth['family'] + ' ' + temp['initials']
+                authname = author['family'] + ' ' + temp['initials']
                 metadata['authors'].update({authname: temp})
             # Check if authors match.
-            for auth in authors:
-                if auth not in metadata['authors']:
+            for author in authors:
+                if author not in metadata['authors']:
                     # TODO: consider possiblility of switched names.
                     metadata['authors'] = []
                     break
@@ -337,12 +346,10 @@ def title_metadata(title, authors, date=''):
             metadata['type'] = response['type']
             metadata['citedby'] = response['is-referenced-by-count']
             metadata['author_count'] = len(response['author'])
-            metadata['source'] = response['container-title'] if type(response['container-title']) is str else ';'.join(response['container-title'])
+            metadata['source'] = response['container-title'] if type(response['container-title']) is str else '; '.join(response['container-title'])
             metadata['date'] = get_date(response['published']['date-parts'][0])
-            try:
+            if 'abstract' in response:
                 metadata['abstract'] = response['abstract']
-            except KeyError:
-                pass
     return metadata
 
 
@@ -369,13 +376,13 @@ def doi_metadata(doi):
     response = requests.get(url, headers=headers).json()['message']
     # Get info about the authors.
     metadata['authors'] = dict()
-    for auth in response['author']:
+    for author in response['author']:
         temp = {
-            'surname': auth['family'],
-            'given_name': auth['given'],
-            'initials': get_initials(auth['given'])
+            'surname': author['family'],
+            'given_name': author['given'],
+            'initials': get_initials(author['given'])
             }
-        authname = auth['family'] + ' ' + temp['initials']
+        authname = author['family'] + ' ' + temp['initials']
         metadata['authors'].update({authname: temp})
     metadata['title'] = response['title'][0] if type(response['title']) is list else response['title']
     metadata['ref_count'] = response['reference-count']
@@ -383,13 +390,11 @@ def doi_metadata(doi):
     metadata['type'] = response['type']
     metadata['date'] = get_date(response['published']['date-parts'][0])
     # Check if there is an abstract.
-    try:
+    if 'abstract' in response:
         metadata['abstract'] = response['abstract']
-    except KeyError:
-        pass
     metadata['citedby'] = response['is-referenced-by-count']
     metadata['author_count'] = len(response['author'])
-    metadata['source'] = response['container-title'] if type(response['container-title']) is str else ';'.join(response['container-title'])
+    metadata['source'] = response['container-title'] if type(response['container-title']) is str else '; '.join(response['container-title'])
     return metadata
 
 
@@ -409,48 +414,49 @@ def fill_missing():
     mycursor.execute('SELECT id, doi, date, citedby, authors, source FROM'
                      ' additional WHERE title is NULL and doi != ""')
     records = mycursor.fetchall()
-    for rec in records:
+    for row in records:
         # Get metadata related to the doi.
-        metadata = doi_metadata(rec[1])
+        metadata = doi_metadata(row[1])
         # Prepare which columns to update via making a string.
         string = 'title="' + metadata['title'] + '"'
         # Check if need to update the date.
-        if str(rec[2]) == '':
+        if str(row[2]) == '':
             string = string + ', date="' + metadata['date'] + '"'
-        elif metadata['date'] != str(rec[2]):
-            if int(metadata['date'][:4]) == int(str(rec[2])[:4]):
-                if int(metadata['date'][5:7]) == int(str(rec[2])[5:7]):
+        elif metadata['date'] != str(row[2]):
+            if int(metadata['date'][:4]) == int(str(row[2])[:4]):
+                if int(metadata['date'][5:7]) == int(str(row[2])[5:7]):
                     if metadata['date'][-2:] != '01':
                         string = string + ', date="' + metadata['date'] + '"'
-                elif int(metadata['date'][5:7]) < int(str(rec[2])[5:7]) and metadata['date'][5:] != '01-01':
+                elif int(metadata['date'][5:7]) < int(str(row[2])[5:7]) and metadata['date'][5:] != '01-01':
                     string = string + ', date="' + metadata['date'] + '"'
-            elif int(metadata['date'][:4]) < int(str(rec[2])[:4]):
+            elif int(metadata['date'][:4]) < int(str(row[2])[:4]):
                 string = string + ', date="' + metadata['date'] + '"'
         # Check if need to update citedby count.
-        if int(metadata['citedby']) > int(rec[3]):
+        if int(metadata['citedby']) > int(row[3]):
             string = string + ', citedby=' + str(metadata['citedby'])
         # Check if need to update authors.
-        if rec[4] != '':
-            authors, val = [], []
-            for auth in metadata['authors']:
+        if row[4] != '':
+            authors, values_to_insert = [], []
+            for author in metadata['authors']:
                 authid = data['auth_my']
                 data['auth_my'] = data['auth_my'] + 1
                 authors.append(str(authid))
-                val.append((authid, auth['authname'], auth['surname'],
-                            auth['given_name'], auth['initials']))
+                values_to_insert.append(
+                    (authid, author['authname'], author['surname'],
+                     author['given_name'], author['initials']))
             mycursor.executemany('INSERT INTO authors (id, authname, surname,'
                                  ' given_name, initials) VALUES (%s, %s, %s,'
-                                 ' %s, %s)', val)
+                                 ' %s, %s)', values_to_insert)
             mydb.commit()
             with open('save.json', 'w', encoding='utf8') as json_file:
                 dump(data, json_file, ensure_ascii=False)
             authors = ','.join(authors)
             string = string + ', authors="' + authors + '"'
         # Check if need to update the source.
-        if rec[5] == '' or rec[5].casefold() != metadata['source'].casefold():
+        if row[5] == '' or row[5].casefold() != metadata['source'].casefold():
             string = string + ', source="' + metadata['source'] + '"'
         # Update the record.
-        mycursor.execute('UPDATE additional SET {string} WHERE eid={eid}'.format(string=string, eid=rec[0]))
+        mycursor.execute(f'UPDATE additional SET {string} WHERE eid={row[0]}')
         mydb.commit()
 
 
