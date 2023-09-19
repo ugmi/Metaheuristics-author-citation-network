@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env pypy
 # -*- coding: utf-8 -*-
 """
 Created on Thu Feb 23 21:08:14 2023
@@ -217,8 +217,8 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
 
     """
     ele_eid = int(ele['eid'][7:])
-    if (ele_eid,) not in all_ids['publications']:  # Add new record to table publications
-        data['newlyadded'] = data['newlyadded'] + 1
+    if (ele_eid,) not in all_ids['publications']:  # Add new record to table.
+        data['newlyadded'] += 1
         all_ids['publications'].add((int(ele['eid'][7:]),))
         affiliations, val, authors = [], [], []
         try:
@@ -235,14 +235,14 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
                 mycursor.executemany(sql['v'], val)
                 mydb.commit()
         except KeyError:
-            pass  # No info on affiliations
+            pass  # No info on affiliations.
         val = []
         try:
             for author in ele['author']:
                 authid = author['authid']
                 if authid == '':
                     authid = data['auth_my']
-                    data['auth_my'] = data['auth_my'] + 1
+                    data['auth_my'] += 1
                 authors.append(authid)
                 if (int(authid),) not in all_ids['authors']:
                     all_ids['a'].add((int(authid),))
@@ -279,7 +279,7 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
                 if str(ele_eid) in referenced_articles.split(','):
                     continue
                 elif referenced_articles != '':
-                    referenced_articles = referenced_articles + ',' + str(ele_eid)
+                    referenced_articles = f'{referenced_articles},{ele_eid}'
                 else:
                     referenced_articles = str(ele_eid)
                 mycursor.execute(
@@ -290,7 +290,7 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
                 f'DELETE FROM additional WHERE id={ele_eid}')
             mydb.commit()
     elif eid == '':  # Update label for article that's already in the table
-        data['indatabase'] = data['indatabase'] + 1
+        data['indatabase'] += 1
         mycursor.execute(
             f'SELECT field FROM publications WHERE eid={ele_eid}')
         label = str(mycursor.fetchall()[0][0])
@@ -301,7 +301,7 @@ def add_record(mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=''):
             if str(ele['eid']) not in data['eids']:
                 data['eids'].append(str(ele['eid']))
         else:
-            label = label + ',' + kw
+            label = f'{label},{kw}'
         mycursor.execute(
             f'UPDATE publications SET field="{label}" WHERE eid={ele_eid}')
         mydb.commit()
@@ -350,13 +350,7 @@ def main():
             try:
                 if data['api'] == '':
                     data['api'] = 'http://api.elsevier.com/content/search/scopus?query=TITLE("{keyword}")%20OR%20ABS("{keyword}")&cursor=*&view=COMPLETE'
-                    cursor = '*'
-                else:
-                    # Resolve some strange issue with cursors.
-                    x = data['api'].find('cursor')
-                    y = data['api'].find('&view')
-                    cursor = data['api'][x+7:y]
-                    cursor = cursor.replace('%3D', '=')
+                    data['cursor'] = '*'
                 # Get documents from SCOPUS that match the specified keyword
                 if len(data['eids']) == 0:
                     response = requests.get(data['api'].format(
@@ -365,23 +359,23 @@ def main():
                         data['limit'] = int(
                             response.headers['X-RateLimit-Remaining'])
                     except KeyError:
-                        data['limit'] = data['limit'] - 1
-                    # Convert response object to json, which is easier to work with
+                        data['limit'] -= 1
+                    # Convert response object to json (it's easier to use).
                     try:
                         response = response.json()['search-results']
                     except JSONDecodeError:
                         with open('save.json', 'w', encoding='utf8') as json_file:
                             dump(data, json_file, ensure_ascii=False)
                         print(response)
-                        print(response.content)
-                        return
+                        continue
                     if response['cursor']['@current'] == response['cursor']['@next']:
-                        # The above condition is true if we reached the end of result set
-                        cursor = '*'
+                        # The above is true if we reached the end of results.
+                        data['cursor'] = '*'
                         data['api'] = ''
                         break
+                    else:
+                        data['cursor'] = response['cursor']['@next']
                     try:
-                        cursor = response['cursor']['@next']
                         for link in response['link']:
                             if link['@ref'] == 'next':
                                 data['api'] = link['@href']
@@ -389,12 +383,11 @@ def main():
                             for ele in response['entry']:
                                 all_ids, data = add_record(
                                     mydb, mycursor, all_ids, data, ele, sql, keyword, kw)
-                                data['records_checked'] = data['records_checked'] + 1
+                                data['records_checked'] += 1
                         except KeyError:
                             print(response)
                             continue
                     except KeyboardInterrupt:
-                        cursor = response['cursor']['@next']
                         for link in response['link']:
                             if link['@ref'] == 'next':
                                 data['api'] = link['@href']
@@ -415,7 +408,7 @@ def main():
                             data['limit'] = int(
                                 response.headers['X-RateLimit-Remaining'])
                         except KeyError:
-                            data['limit'] = data['limit'] - 1
+                            data['limit'] -= 1
                         try:
                             response = response.json()['search-results']
                         except KeyError:
@@ -425,54 +418,52 @@ def main():
                             with open('save.json', 'w', encoding='utf8') as json_file:
                                 dump(data, json_file, ensure_ascii=False)
                             print(response)
-                            print(response.content)
-                            return
+                            continue
                         if data['cursor'] == response['cursor']['@next']:
                             data['cursor'] = '*'
                             data['eids'].remove(eid)
                             continue
-                        try:
+                        else:
                             data['cursor'] = response['cursor']['@next']
+                        try:
                             for ele in response['entry']:
                                 ele_eid = int(ele['eid'][7:])
                                 if (ele_eid,) in all_ids['publications']:
-                                    data['indatabase'] = data['indatabase'] + 1
-                                    data['records_checked'] = data['records_checked'] + 1
+                                    data['indatabase'] += 1
+                                    data['records_checked'] += 1
                                     mycursor.execute(
                                         f'SELECT cites from publications WHERE eid={ele_eid}')
                                     referenced_articles = str(mycursor.fetchall()[0][0])
-                                    if str(int(eid[7:])) in referenced_articles.split(','):
+                                    if eid[7:] in referenced_articles.split(','):
                                         continue
                                     if referenced_articles == '':
-                                        referenced_articles = str(int(eid[7:]))
+                                        referenced_articles = eid[7:]
                                     else:
-                                        referenced_articles = referenced_articles + ',' + str(int(eid[7:]))
+                                        referenced_articles = f'{referenced_articles},{eid[7:]}'
                                     mycursor.execute(
                                         f'UPDATE publications SET cites="{referenced_articles}" WHERE eid={ele_eid}')
                                     mydb.commit()
                                     continue
                                 all_ids, data = add_record(
                                     mydb, mycursor, all_ids, data, ele, sql, keyword, kw, eid=eid)
-                                data['records_checked'] = data['records_checked'] + 1
+                                data['records_checked'] += 1
                         except KeyboardInterrupt:
                             foo = mycursor.fetchall()  # Collect records to avoid raising errors
-                            data['cursor'] = '*'
                             with open('save.json', 'w', encoding='utf8') as json_file:
                                 dump(data, json_file, ensure_ascii=False)
-                            data['cursor'] = response['cursor']['@next']
                             for ele in response['entry']:
                                 ele_eid = int(ele['eid'][7:])
                                 if (ele_eid,) in all_ids['publications']:
-                                    data['indatabase'] = data['indatabase'] + 1
+                                    data['indatabase'] += 1
                                     mycursor.execute(
                                         f'SELECT cites from publications WHERE eid={ele_eid}')
                                     referenced_articles = str(mycursor.fetchall()[0][0])
-                                    if str(int(eid[7:])) in referenced_articles.split(','):
+                                    if eid[7:] in referenced_articles.split(','):
                                         continue
                                     if referenced_articles == '':
-                                        referenced_articles = str(int(eid[7:]))
+                                        referenced_articles = eid[7:]
                                     else:
-                                        referenced_articles = referenced_articles + ',' + str(int(eid[7:]))
+                                        referenced_articles = f'{referenced_articles},{eid[7:]}'
                                     mycursor.execute(
                                         f'UPDATE publications SET cites="{referenced_articles}" WHERE eid={ele_eid}')
                                     mydb.commit()
@@ -483,14 +474,14 @@ def main():
             except KeyboardInterrupt:
                 with open('save.json', 'w', encoding='utf8') as json_file:
                     dump(data, json_file, ensure_ascii=False)
-                return  # If we haven't fetched the records from SCOPUS yet
+                return  # If no records fetched from SCOPUS yet
         f = open('added_keywords.txt', 'a')
-        f.write('\n' + keyword + ' : ' + kw)
+        f.write(f'\n{keyword} : {kw}')
         f.close()
         keywords_abbr.pop(keyword)
         f = open('list-of-labels.txt', 'w')
         for key in keywords_abbr:
-            f.write(key + ' : ' + keywords_abbr[key] + '\n')
+            f.write(f'{key} : {keywords_abbr[key]}\n')
         f.close()
     with open('save.json', 'w', encoding='utf8') as json_file:
         dump(data, json_file, ensure_ascii=False)
