@@ -84,7 +84,7 @@ def print_table(data, labels, name='table'):
         info[key]['total'] = sum(data[key])
         info[key]['size'] = len(data[key])
     # Print table to file.
-    f = open(name+'.txt', 'w')
+    f = open(f'{name}.txt', 'w')
     tb = pd.DataFrame(data=info)
     f.write(tabulate(tb.transpose(), tablefmt='fancy_grid', floatfmt=".3f",
                      headers=['subfield', 'avg', 'stdev', 'total', 'size']))
@@ -159,10 +159,10 @@ def graph_stats(G, name, plot=False):
         return
     data.sort(reverse=True)
     # Print basic stats.
-    print('Maximum ' + name + ':', data[0])
-    print('Average ' + name + ':', round(mean(data), 3))
-    print('Standard deviation:', round(stdev(data), 3))
-    print('Mode:', mode(data))
+    print(f'Maximum {name}: {data[0]}')
+    print(f'Average {name}: {round(mean(data), 3)}')
+    print(f'Standard deviation: {round(stdev(data), 3)}')
+    print(f'Mode: {mode(data)}')
     print('Percentage of nodes that are mode:',
           round(data.count(mode(data))/len(data), 3))
     if plot:

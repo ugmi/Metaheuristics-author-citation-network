@@ -49,10 +49,10 @@ def graph_stats(G, name, plot=False):
         return
     data.sort(reverse=True)
     # Print basic stats.
-    print('Maximum ' + name + ':', data[0])
-    print('Average ' + name + ':', round(mean(data), 3))
-    print('Standard deviation:', round(stdev(data), 3))
-    print('Mode:', mode(data))
+    print(f'Maximum {name}: {data[0]}')
+    print(f'Average {name}: {round(mean(data), 3)}')
+    print(f'Standard deviation: {round(stdev(data), 3)}')
+    print(f'Mode: {mode(data)}')
     print('Percentage of nodes that are mode:',
           round(data.count(mode(data))/len(data), 3))
     if plot:
@@ -373,8 +373,8 @@ if False:
     for g in G:
         try:
             if not (G.nodes[g]['field'] == 'OTHER') and G.nodes[g]['citedby'] > G.in_degree(g):
-                print(','.join(['2-s2.0-'+g, str(G.nodes[g]['citedby']), str(G.in_degree(g))]))
-                missing.append('2-s2.0-'+g)
+                print(f"2-s2.0-{g}, {G.nodes[g]['citedby']}, {G.in_degree(g)})")
+                missing.append(f'2-s2.0-{g}')
         except KeyError:
             continue
 
@@ -384,8 +384,8 @@ if False:
     for g in G:
         try:
             if not (G.nodes[g]['field'] == 'OTHER') and G.nodes[g]['refcount'] != G.out_degree(g):
-                comp.append(','.join(['2-s2.0-'+g, str(G.nodes[g]['refcount']), str(G.out_degree(g)), '\n']))
-                missing.append('2-s2.0-'+g)
+                comp.append(f"2-s2.0-{g}, {G.nodes[g]['refcount']}, {G.out_degree(g)}, \n")
+                missing.append(f'2-s2.0-{g}')
         except KeyError:
             continue
     f = open('compare' + '.txt', 'w')
