@@ -1,15 +1,17 @@
 cuckoo search : CS
+cuckoo optimization algorithm : CS
+cuckoo optimizer : CS
+cuckoo algorithm : CS
 firefly algorithm : FA
 firefly optimization algorithm : FA
 firefly optimizer : FA
 bat algorithm : BA
 bat optimization algorithm : BA
 bat inspired optimization: BA
+bat inspired algorithm : BA 
 charged system search : CSS
 water cycle algorithm : WCA
 water cycle optimization algorithm : WCA
-cuckoo optimization algorithm : COA
-cuckoo optimizer : COA
 whale optimization algorithm : WOA
 whale algorithm : WOA
 whale optimizer : WOA
@@ -45,6 +47,8 @@ imperialist competitive algorithm : ICA
 imperialist competitive optimization : ICA
 bees algorithm : BeA
 bees optimization algorithm : BeA
+honey bee mating algorithm : BeA
+honey bee mating optimization : BeA 
 grey wolf optimizer : GWO
 grey wolf algorithm : GWO
 grey wolf optimization : GWO
@@ -75,3 +79,4 @@ ant system : ANT
 differential evolution : DE
 particle swarm optimization : PSO
 particle swarm optimizer : PSO
+particle swarm algorithm : PSO
