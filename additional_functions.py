@@ -32,7 +32,7 @@ def relabel_indatabase(old, new):
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
     mycursor.execute(
-        f'SELECT eid, field FROM publications WHERE field LIKE "%{old}"')
+        f'SELECT eid, field FROM publications WHERE field LIKE "%{old}%"')
     data = mycursor.fetchall()
     for ele in data:  # Update each record.
         fields = ele[1].replace(old, new)
@@ -47,7 +47,7 @@ def rename_dict(labels):
 
     Example
     -------
-        Argument labels=['HS','CS'] returns {'HS': 'A1', 'CS': 'A2'}.
+        Argument labels=['HS','CS'] eturns {'HS': 'A1', 'CS': 'A2'}.
 
     Parameters
     ----------
@@ -88,7 +88,8 @@ def merge_records(mydb, mycursor, idp, ida):
     """
     Merge two identical records if their authors match.
 
-    Also updates the ids associated with relevant authors.
+    The function updates the ids (aliases) associated with relevant authors.
+    Keeps the record in the publications table and deletes the other one.
 
     Parameters
     ----------
@@ -146,6 +147,7 @@ def merge_records(mydb, mycursor, idp, ida):
     aliases = dict()  # Store ids with corresponding aliases.
     for name in info_ida['authors']:
         if name in info_idp['authors']:
+            # Add & append ids in aliases if we match atuhor names.
             authid_ida = info_ida['authors'][name][0]
             authid_idp = info_idp['authors'][name][0]
             # Check if not already present in the dictionary.
@@ -156,6 +158,7 @@ def merge_records(mydb, mycursor, idp, ida):
                 # Join lists of aliases.
                 aliases[authid_ida] = [authid_idp] + \
                     info_ida['authors'][name][2]
+            # Check if not already present in the dictionary.
             if authid_idp in aliases:
                 if authid_ida not in aliases[authid_idp]:
                     aliases[authid_idp].append(authid_ida)
@@ -173,7 +176,7 @@ def merge_records(mydb, mycursor, idp, ida):
         mycursor.execute(
             f'UPDATE authors SET aka="{",".join(aliases[ala])}" WHERE id={ala}')
     mydb.commit()
-    # Update related records.
+    # Update the reference lists of articles that cite the duplicated record.
     for ref in info_ida['citing_articles'].split(','):
         mycursor.execute(
             f'SELECT cites FROM publications WHERE eid={ref}')
@@ -193,7 +196,10 @@ def merge_records(mydb, mycursor, idp, ida):
 
 
 def merge_matching_doi():
-    """Merge all records with identical doi from the two tables."""
+    """Merge all records with identical doi from the two tables.
+
+    For every doi in additional table, if it is also in the publications table,
+    get associated scopus ids and titles. If titles match, merge records."""
     db_data = load(open('mydb_setup.json'))
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
@@ -204,11 +210,15 @@ def merge_matching_doi():
     for doi in other_dois:
         if doi in publication_dois:
             mycursor.execute(
-                f'SELECT eid from publications WHERE doi="{doi[0]}"')
-            idp = mycursor.fetchall()[0][0]
-            mycursor.execute(f'SELECT id from additional WHERE doi="{doi[0]}"')
-            ida = mycursor.fetchall()[0][0]
-            merge_records(mydb, mycursor, idp, ida)
+                f'SELECT eid, title from publications WHERE doi="{doi[0]}"')
+            res = mycursor.fetchall()[0]
+            id_p, title_p = res
+            mycursor.execute(
+                f'SELECT id, title from additional WHERE doi="{doi[0]}"')
+            res = mycursor.fetchall()[0]
+            id_a, title_a = res
+            if normalize(title_p) == normalize(title_a):
+                merge_records(mydb, mycursor, id_p, id_a)
 
 
 def merge_matching_title():
@@ -236,7 +246,7 @@ def merge_matching_title():
             # TODO: Check if other information matches.
             if other_titles[ele]['doi'] == '':
                 # Check if dates match.
-                year_and_month_match = other_titles[ele]['date'][:-3] == publication_titles[ele]['date'][:-3]
+                year_and_month_match = (other_titles[ele]['date'][:-3] == publication_titles[ele]['date'][:-3])
                 if other_titles[ele]['date'] == 'None' or year_and_month_match:
                     merge_records(
                         mydb, mycursor, publication_titles[ele]['eid'], other_titles[ele]['id'])
@@ -305,13 +315,18 @@ def get_date(date_parts):
 def title_metadata(title, authors, date=''):
     """
     Get the doi and other metadata based on the publication`s title.
+    
+    Get a list of 5 works that most closely match the given title (and date, 
+    if given). Check if any of these works match the title exactly. If there is
+    such a work, check if the authors also match. If so, return the additional
+    information in a form of a dictionary.
 
     Parameters
     ----------
     title : str
         Title of the publication.
-    authors : dict
-        Dictionary of information about the authors, keyed by authnames.
+    authors : set
+         Set of author names in the form of 'Surname N.'.
     date : str, optional
         Date of publication. The default is ''.
 
@@ -348,7 +363,6 @@ def title_metadata(title, authors, date=''):
             # Check if authors match.
             for author in authors:
                 if author not in metadata['authors']:
-                    # TODO: consider possiblility of switched names.
                     metadata['authors'] = []
                     break
             # Continue to next record if authors do not match.
@@ -360,7 +374,8 @@ def title_metadata(title, authors, date=''):
             metadata['type'] = response['type']
             metadata['citedby'] = response['is-referenced-by-count']
             metadata['author_count'] = len(response['author'])
-            metadata['source'] = response['container-title'] if type(response['container-title']) is str else '; '.join(response['container-title'])
+            metadata['source'] = response['container-title'] if type(
+                response['container-title']) is str else '; '.join(response['container-title'])
             metadata['date'] = get_date(response['published']['date-parts'][0])
             if 'abstract' in response:
                 metadata['abstract'] = response['abstract']
@@ -378,7 +393,7 @@ def doi_metadata(doi):
 
     Returns
     -------
-    metadata : dict
+    metadata : dictionary
         Dictionary containing the metadata for the given doi.
 
     """
@@ -409,50 +424,117 @@ def doi_metadata(doi):
         metadata['abstract'] = response['abstract']
     metadata['citedby'] = response['is-referenced-by-count']
     metadata['author_count'] = len(response['author'])
-    metadata['source'] = response['container-title'] if type(response['container-title']) is str else '; '.join(response['container-title'])
+    metadata['source'] = response['container-title'] if type(
+        response['container-title']) is str else '; '.join(response['container-title'])
     return metadata
 
 
-def fill_missing():
+def get_update_string(metadata, row, match_type):
     """
-    Fill missing info for records in additional table with a doi.
+    Generate string for updating records in the database.
+
+    Parameters
+    ----------
+    metadata : dict
+        Information from crossref.
+    row : tuple
+        Information on the record from the dataabse.
+    match_type : string
+        Information used to match on crossref. Either 'doi' or 'title'.
 
     Returns
     -------
-    None.
+    string : string
+        The string to update the records.
+
+    """
+    if match_type == 'doi':
+        string = f'title="{metadata["title"]}"'
+    elif match_type == 'title':
+        string = f'doi="{metadata["doi"]}"'
+    # Check if need to update the date.
+    if str(row[2]) == '':
+        string = f'{string}, date="{metadata["date"]}"'
+    elif metadata['date'] != str(row[2]):
+        # Check if years match.
+        if metadata['date'][:4] == str(row[2])[:4]:
+            # Check if months match.
+            if metadata['date'][5:7] == str(row[2])[5:7]:
+                if metadata['date'][-2:] != '01':
+                    string = f'{string}, date="{metadata["date"]}"'
+            elif int(metadata['date'][5:7]) < int(str(row[2])[5:7]):
+                if metadata['date'][5:] != '01-01':
+                    # Keep the earlier date if months diverge.
+                    string = f'{string}, date="{metadata["date"]}"'
+        elif int(metadata['date'][:4]) < int(str(row[2])[:4]):
+            # Keep the earlier date if years diverge.
+            string = f'{string}, date="{metadata["date"]}"'
+    # Check if need to update citedby count.
+    if int(metadata['citedby']) > int(row[3]):
+        string = f'{string}, citedby={metadata["citedby"]}'
+    # Check if need to update the source.
+    if row[5] == '' or row[5].casefold() != metadata['source'].casefold():
+        string = f'{string}, source="{metadata["source"]}"'
+    return string
+
+
+def fill_missing(table, match_type):
+    """
+    Fill missing info for records in additional table with a doi.
+
+    We select records from additional table without a title but with a doi.
+    Get additional information from crossref based on the doi; edit if needed.
+    Insert the additional information into the table.
+
+    Parameters
+    ----------
+    table : string
+    Name of table where the record is located.
+
+    match_type : string
+    Information used to match on crossref. Either 'doi' or 'title'.
 
     """
     db_data = load(open('mydb_setup.json'))
     data = load(open('save.json'))
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
-    mycursor.execute('SELECT id, doi, date, citedby, authors, source FROM'
-                     ' additional WHERE title is NULL and doi != ""')
+    if match_type == 'doi':
+        mycursor.execute('SELECT title, doi, date, citedby, authors, source,'
+                         ' id FROM additional WHERE doi != ""')
+    elif match_type == 'title':
+        if table == 'publications':
+            mycursor.execute('SELECT title, doi, date, citedby, authors, '
+                             'source, eid FROM publications WHERE doi = "" and'
+                             ' authors != ""')
+        elif table == 'additional':
+            mycursor.execute('SELECT title, doi, date, citedby, authors,'
+                             ' source, id FROM additional WHERE title is not'
+                             ' NULL and authors != ""')
+        else:
+            raise Exception('Please choose a different table.')
+    else:
+        raise Exception('Please choose a different match_type.')
     records = mycursor.fetchall()
     for row in records:
-        # Get metadata related to the doi.
-        metadata = doi_metadata(row[1])
-        # Prepare which columns to update via making a string.
-        string = f'title="{metadata["title"]}"'
-        # Check if need to update the date.
-        if str(row[2]) == '':
-            string = f'{string}, date="{metadata["date"]}"'
-        elif metadata['date'] != str(row[2]):
-            # Check if years match.
-            if metadata['date'][:4] == str(row[2])[:4]:
-                # Check if months match.
-                if metadata['date'][5:7] == str(row[2])[5:7]:
-                    if metadata['date'][-2:] != '01':
-                        string = f'{string}, date="{metadata["date"]}"'
-                elif int(metadata['date'][5:7]) < int(str(row[2])[5:7]) and metadata['date'][5:] != '01-01':
-                    # Keep the earlier date if months diverge.
-                    string = f'{string}, date="{metadata["date"]}"'
-            elif int(metadata['date'][:4]) < int(str(row[2])[:4]):
-                # Keep the earlier date if years diverge.
-                string = f'{string}, date="{metadata["date"]}"'
-        # Check if need to update citedby count.
-        if int(metadata['citedby']) > int(row[3]):
-            string = f'{string}, citedby={metadata["citedby"]}'
+        # Get metadata.
+        if match_type == 'doi':
+            metadata = doi_metadata(row[1])
+        else:
+            if row[2] is None:
+                date = ''
+            else:
+                date = row[2]
+            authors = set()
+            for ele in row[4].split(','):
+                mycursor.execute(
+                    f'SELECT authname from authors where id={ele}')
+                authors.add(mycursor.fetchall()[0][0])
+            metadata = title_metadata(row[0], authors, date=date)
+        if len(metadata) == 0:
+            continue
+        # Prepare information to update via making a string.
+        string = get_update_string(metadata, row, match_type)
         # Check if need to update authors.
         if row[4] != '':
             authors, values_to_insert = [], []
@@ -471,11 +553,13 @@ def fill_missing():
                 dump(data, json_file, ensure_ascii=False)
             authors = ','.join(authors)
             string = f'{string}, authors="{authors}"'
-        # Check if need to update the source.
-        if row[5] == '' or row[5].casefold() != metadata['source'].casefold():
-            string = f'{string}, source="{metadata["source"]}"'
         # Update the record.
-        mycursor.execute(f'UPDATE additional SET {string} WHERE eid={row[0]}')
+        if table == 'additional':
+            mycursor.execute(
+                f'UPDATE additional SET {string} WHERE id={row[6]}')
+        else:
+            mycursor.execute(
+                f'UPDATE publications SET {string} WHERE eid={row[6]}')
         mydb.commit()
 
 
