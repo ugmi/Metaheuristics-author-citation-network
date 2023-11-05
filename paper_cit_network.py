@@ -208,8 +208,15 @@ def get_data(source):
         others_data = mycursor.fetchall()
     elif source == 'csv':
         # Change the file paths if needed.
-        publications_data = eval(pd.read_csv('publications.csv', sep=',', usecols=['eid', 'field', 'cites', 'authors', 'citedby', 'ref_count']).to_json(orient='values'))
-        others_data = eval(pd.read_csv('additional.csv', sep=',', usecols=['id', 'authors', 'referenced_by']).to_json(orient='values'))
+        publications_data = eval(pd.read_csv('publications.csv', sep=',',
+                                             usecols=['eid', 'field', 'cites',
+                                                      'authors', 'citedby',
+                                                      'ref_count']).to_json(
+                                                          orient='values'))
+        others_data = eval(pd.read_csv('additional.csv', sep=',',
+                                       usecols=['id', 'authors',
+                                                'referenced_by']).to_json(
+                                                    orient='values'))
     else:
         raise ValueError('argument value not appropriate')
     return (publications_data, others_data)
@@ -218,7 +225,7 @@ def get_data(source):
 def paper_citation_network(source='database'):
     """
     Generate the paper-citation network.
-    
+
     Parameters
     ----------
     source : str, optional
@@ -326,69 +333,115 @@ def expected_proportions(G, labels, n_iter=5):
     return means, sd
 
 
-G, labels = paper_citation_network()
-cdeg_out, cdeg_in, categories = props_per_cpt(G, labels)
-if False:
-    print_table(cdeg_out, labels, name='out')
-    print_table(cdeg_in, labels, name='in')
-print([(nm, len(categories[nm])) for nm in categories])
-
-# Generate random graph with the same degree distribution.
-D = nx.directed_configuration_model(
-    [entr[1] for entr in G.in_degree()], [entr[1] for entr in G.out_degree()], nx.DiGraph())
-
-edges = [e for e in G.edges()]
-GM = G.copy()  # Graph with no author self-citatioins.
-GSC = G.copy()  # Graph with only author self-citations.
-GSC.clear_edges()
-for e in edges:
-    a0 = set(G.nodes[e[0]]['authors'].split(','))
-    a1 = set(G.nodes[e[1]]['authors'].split(','))
-    for auth in a0:
-        if auth in a1:
-            GM.remove_edge(e[0], e[1])
-            GSC.add_edge(e[0], e[1])
-            break
-
-e_to, e_from, e_w = to_from_w_labels(G, labels)
-n_labels = len(labels)
-arr1 = np.empty((n_labels, n_labels), dtype=float)
-proportions = list()
-labels = list(labels)
-for i in range(n_labels):
-    n = e_from[labels[i]]
-    for j in range(n_labels):
-        try:
-            arr1[i, j] = e_w[(labels[i], labels[j])] / n
-        except ZeroDivisionError:
-            arr1[i, j] = 0
-        proportions.append(((labels[i], labels[j]), arr1[i, j]))
-proportions.sort(key=lambda e: e[1], reverse=True)
-
-graph_stats(G, 'outdegree', plot=False)
-graph_stats(G, 'indegree', plot=False)
-# Check for missing data based on the network.
-if False:
-    missing = list()
-    for g in G:
-        try:
-            if not (G.nodes[g]['field'] == 'OTHER') and G.nodes[g]['citedby'] > G.in_degree(g):
-                print(f"2-s2.0-{g}, {G.nodes[g]['citedby']}, {G.in_degree(g)})")
-                missing.append(f'2-s2.0-{g}')
-        except KeyError:
-            continue
-
-if False:
-    missing = list()
+def compare_citation_counts(G):
     comp = list()
     for g in G:
         try:
-            if not (G.nodes[g]['field'] == 'OTHER') and G.nodes[g]['refcount'] != G.out_degree(g):
-                comp.append(f"2-s2.0-{g}, {G.nodes[g]['refcount']}, {G.out_degree(g)}, \n")
-                missing.append(f'2-s2.0-{g}')
+            if (not (G.nodes[g]['field'] == 'OTHER') and
+                    G.nodes[g]['citedby'] > G.in_degree(g)):
+                comp.append(
+                    f"2-s2.0-{g}, {G.nodes[g]['citedby']}, {G.in_degree(g)}\n")
         except KeyError:
             continue
-    f = open('compare' + '.txt', 'w')
+        f = open('compare_cit.txt', 'w')
+        for ele in comp:
+            f.write(ele)
+        f.close()
+
+
+def compare_reference_counts(G):
+    comp = list()
+    for g in G:
+        try:
+            if (not (G.nodes[g]['field'] == 'OTHER') and
+                    G.nodes[g]['refcount'] != G.out_degree(g)):
+                comp.append(
+                    f"2-s2.0-{g}, {G.nodes[g]['refcount']}, {G.out_degree(g)}\n")
+        except KeyError:
+            continue
+    f = open('compare.txt', 'w')
     for ele in comp:
         f.write(ele)
     f.close()
+
+
+def remove_ref(string, ref):
+    updated_string = string.replace(ref, '')
+    updated_string = updated_string.replace(',,', ',')
+    updated_string = updated_string.strip(',')
+    return updated_string
+
+
+def remove_edges_between_other(G):
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT eid FROM publications')
+    ids_publications = set(mycursor.fetchall())
+    edges_to_remove = set()
+    for e1, e2 in G.edges():
+        if G.nodes[e1]['field'] == 'OTHER' and G.nodes[e2]['field'] == 'OTHER':
+            edges_to_remove.add((e1, e2))
+            if (int(e1),) in ids_publications:
+                mycursor.execute(
+                    f'SELECT cites FROM publications WHERE eid={e1}')
+                string = mycursor.fetchall()[0][0]
+                updated = remove_ref(string, e2)
+                mycursor.execute(
+                    f'UPDATE publications SET cites="{updated}" WHERE eid={e1}')
+                mydb.commit()
+    G.remove_edges_from(edges_to_remove)
+    return G, len(edges_to_remove)
+
+
+G, labels = paper_citation_network()
+
+if False:
+    cdeg_out, cdeg_in, categories = props_per_cpt(G, labels)
+if False:
+    print_table(cdeg_out, labels, name='out')
+    print_table(cdeg_in, labels, name='in')
+if False:
+    print([(nm, len(categories[nm])) for nm in categories])
+
+if False:
+    # Generate random graph with the same degree distribution.
+    D = nx.directed_configuration_model(
+            [entr[1] for entr in G.in_degree()],
+            [entr[1] for entr in G.out_degree()],
+            nx.DiGraph())
+
+    edges = [e for e in G.edges()]
+    GM = G.copy()  # Graph with no author self-citatioins.
+    GSC = G.copy()  # Graph with only author self-citations.
+    GSC.clear_edges()
+    for e in edges:
+        a0 = set(G.nodes[e[0]]['authors'].split(','))
+        a1 = set(G.nodes[e[1]]['authors'].split(','))
+        for auth in a0:
+            if auth in a1:
+                GM.remove_edge(e[0], e[1])
+                GSC.add_edge(e[0], e[1])
+                break
+
+    e_to, e_from, e_w = to_from_w_labels(G, labels)
+    n_labels = len(labels)
+    arr1 = np.empty((n_labels, n_labels), dtype=float)
+    proportions = list()
+    labels = list(labels)
+    for i in range(n_labels):
+        n = e_from[labels[i]]
+        for j in range(n_labels):
+            try:
+                arr1[i, j] = e_w[(labels[i], labels[j])] / n
+            except ZeroDivisionError:
+                arr1[i, j] = 0
+            proportions.append(((labels[i], labels[j]), arr1[i, j]))
+    proportions.sort(key=lambda e: e[1], reverse=True)
+
+    graph_stats(G, 'outdegree', plot=False)
+    graph_stats(G, 'indegree', plot=False)
+# Check for missing data based on the network.
+# compare_citation_counts(G)
+# compare_reference_counts(G)
+    
