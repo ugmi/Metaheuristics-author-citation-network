@@ -239,36 +239,40 @@ def paper_citation_network(source='database'):
         Set of labels of subfields.
 
     """
+    G = nx.DiGraph()
     data_pub, data_add = get_data(source)
-    nodes = [str(int(d[0])) for d in data_pub]
+    nodes = [str(d[0]) for d in data_pub]
+    gen_pub = (x for x in data_pub)
+    gen_add = (x for x in data_add)
+    G.add_nodes_from(nodes)
+    del nodes, data_add
     edges, fields, citedby, authors, refcount = set(), dict(), dict(), dict(), dict()
-    for entry in data_pub:
-        eid = str(int(entry[0]))
+    for entry in gen_pub:
+        eid = str(entry[0])
         fields[eid] = entry[1]
         authors[eid] = entry[3]
         citedby[eid] = entry[4]
         refcount[eid] = entry[5]
     labels = set(fields.values())
-    for entry in data_pub:
-        try:
-            cites = entry[2].split(',')
-        except AttributeError:
-            continue
-        if cites[0] != '':
+    gen_pub = (x for x in data_pub)
+    del data_pub
+    for entry in gen_pub:
+        if entry[2] != '':
+            try:
+                cites = (x for x in entry[2].split(','))
+            except AttributeError:
+                continue
             for ele in cites:
-                edges.add((str(int(entry[0])), str(int(ele))))
-    for entry in data_add:
-        eid = str(int(entry[0]))
-        nodes.append(eid)
+                G.add_edge(str(entry[0]), ele)
+    for entry in gen_add:
+        eid = str(entry[0])
+        G.add_node(eid)
         authors[eid] = entry[1]
         fields[eid] = 'OTHER'
-        cites = entry[2].split(',')
-        if cites[0] != '':
+        if entry[2] != '':
+            cites = (x for x in entry[2].split(','))
             for ele in cites:
-                edges.add((str(int(ele)), eid))
-    G = nx.DiGraph()
-    G.add_nodes_from(nodes)
-    G.add_edges_from(edges)
+                G.add_edge(ele, eid)
     nx.set_node_attributes(G, fields, 'field')
     nx.set_node_attributes(G, citedby, 'citedby')
     nx.set_node_attributes(G, refcount, 'refcount')
@@ -392,6 +396,28 @@ def remove_edges_between_other(G):
                 mydb.commit()
     G.remove_edges_from(edges_to_remove)
     return G, len(edges_to_remove)
+
+
+def get_ids_no_doi():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute(
+        'SELECT eid FROM publications WHERE doi = ""')
+    data = mycursor.fetchall()
+    mycursor.execute(
+        'SELECT id FROM additional WHERE doi = ""')
+    data.extend(mycursor.fetchall())
+    ids = set(str(x[0]) for x in data)
+    return ids
+
+
+def check_weakly_connected(G):
+    suburbian_nodes = set(n for n in G if G.degree(n) <= 1)
+    ids = get_ids_no_doi()
+    other = set(n for n in suburbian_nodes if G.nodes[n]['field'] == 'OTHER' and n in ids)
+    main = set(n for n in suburbian_nodes if n not in other and n in ids)
+    return(main, other)
 
 
 G, labels = paper_citation_network()
