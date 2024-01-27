@@ -14,6 +14,7 @@ from statistics import stdev, mean, mode, StatisticsError
 from tabulate import tabulate
 import pandas as pd
 from json import load
+from itertools import combinations, chain
 
 
 def to_from_w_labels(G, labels):
@@ -236,18 +237,66 @@ def get_data(source):
         mydb = mysql.connector.connect(**db_data)
         mycursor = mydb.cursor()
         mycursor.execute(
-            'SELECT eid, field, cites, authors FROM publications')
+            'SELECT eid, authors, cites, field FROM publications')
         publications_data = mycursor.fetchall()
         mycursor.execute(
-            "SELECT id, authors, referenced_by FROM additional")
+            'SELECT id, authors, referenced_by FROM additional')
         others_data = mycursor.fetchall()
+        mycursor.execute('SELECT id FROM authors')
+        authors_data = set(mycursor.fetchall())
     elif source == 'csv':
         # Change the file paths if needed.
         publications_data = eval(pd.read_csv('publications.csv', sep=',', usecols=['eid', 'field', 'cites', 'authors']).to_json(orient='values'))
         others_data = eval(pd.read_csv('additional.csv', sep=',', usecols=['id', 'authors', 'referenced_by']).to_json(orient='values'))
+        authors_data = set(eval(pd.read_csv('authors.csv', sep=',', usecols=['id']).to_json(orient='values')))
     else:
         raise ValueError('argument value not appropriate')
-    return (publications_data, others_data)
+    return (publications_data, others_data, authors_data)
+
+
+def get_author_fields(subfields, counts):
+    fields = dict()
+    gen_keys = (a for a in counts)
+    for a in gen_keys:
+        fd = []
+        for f in subfields:
+            if counts[a][f] > 0:
+                fd.append(f)
+        if len(fd) > 0:
+            fields[a] = ','.join(fd)
+        else:
+            fields[a] = 'OTHER'
+    return fields
+
+
+def update_counts(author_list, counts, empty, fd):
+    auth_gen = (a for a in author_list)
+    for a in auth_gen:
+        if a not in counts:
+            counts[a] = empty.copy()
+        for ele in fd:
+            counts[a][ele] = counts[a][ele] + 1
+    return counts
+
+
+def get_generators_and_net(source):
+    def concat(a, b):
+        yield from a
+        yield from b
+    data_pub, data_add, authors = get_data(source)
+    GA = nx.DiGraph()
+    GA.add_nodes_from(authors)
+    del authors
+    print('Authors added')
+    work_to_auth = dict()
+    chain_works = concat(data_pub, data_add)
+    pub_gen = (x for x in data_pub)
+    add_gen = (x for x in data_add)
+    del data_pub, data_add
+    print('Generators finished')
+    for entry in chain_works:
+        work_to_auth[str(entry[0])] = entry[1].split(',')
+    return GA, pub_gen, add_gen, work_to_auth
 
 
 def author_citation_graph(subfields, source='database'):
@@ -267,103 +316,110 @@ def author_citation_graph(subfields, source='database'):
         Author-citation network.
 
     """
-    data_pub, data_add = get_data(source)
-    authors = set()
-    connections = set()
-    work_to_auth = dict()
+    GA, pub_gen, add_gen, work_to_auth = get_generators_and_net(source)
     weights = dict()
-    fields = dict()
     counts = dict()
     empty = dict()
     for entry in subfields:
         empty[entry] = 0
-    for entry in data_pub:
-        work_to_auth[str(entry[0])] = entry[3].split(',')
-    for entry in data_add:
-        work_to_auth[str(entry[0])] = entry[1].split(',')
+    print('Adding pub')
     # Add authors from publications table.
-    for entry in data_pub:
-        fd = entry[1].split(',')
-        auth = entry[3].split(',')
-        for a in auth:
-            if a not in counts:
-                counts[a] = empty.copy()
-            for ele in fd:
-                counts[a][ele] = counts[a][ele] + 1
-        authors.update(auth)
+    for entry in pub_gen:
+        # fd = entry[3].split(',')
+        auth = entry[1].split(',')
+        # counts = update_counts(auth, counts, empty, fd)
         try:
-            cites = entry[2].split(',')
+            cites = set(entry[2].split(','))
+            if cites != {''}:
+                cites = (ele for ele in cites)
+            else:
+                continue
         except AttributeError:
             continue
-        if cites[0] != '':
-            for ele in set(cites):
-                for w in work_to_auth[ele]:
-                    for a in auth:
-                        if (a, w) in connections:
-                            weights[(a, w)] = weights[(a, w)] + 1
-                        else:
-                            connections.add((a, w))
-                            weights[(a, w)] = 1
-    # Add authors from additional table.
-    for entry in data_add:
-        auth = entry[1].split(',')
-        fd = 'OTHER'
-        auth = entry[1].split(',')
-        for a in auth:
-            if not (a in counts):
-                counts[a] = empty.copy()
-            counts[a][fd] = counts[a][fd] + 1
-        authors.update(auth)
-        try:
-            citedby = entry[2].split(',')
-        except AttributeError:
-            continue
-        for ele in set(citedby):
-            for w in work_to_auth[ele]:
+        for ele in cites:
+            auth_gen = (x for x in work_to_auth[ele])
+            for w in auth_gen:
                 for a in auth:
-                    if (w, a) in connections:
+                    GA.add_edge(a, w)
+                    
+                    if (a, w) in weights:
+                        weights[(a, w)] = weights[(a, w)] + 1
+                    else:
+                        GA.add_edge(a, w)
+                        weights[(a, w)] = 1
+                    
+    print('Pub finished')
+    # Add authors from additional table.
+    for entry in add_gen:
+        auth = entry[1].split(',')
+        # counts = update_counts(auth, counts, empty, ['OTHER'])
+        try:
+            citedby = set(entry[2].split(','))
+            if citedby != {''}:
+                citedby = (ele for ele in citedby)
+            else:
+                continue
+        except AttributeError:
+            continue
+        for ele in citedby:
+            auth_gen = (x for x in work_to_auth[ele])
+            for w in auth_gen:
+                for a in auth:
+                    GA.add_edge(w, a)
+                    
+                    if (w, a) in weights:
                         weights[(w, a)] = weights[(w, a)] + 1
                     else:
-                        connections.add((w, a))
+                        GA.add_edge(w, a)
                         weights[(w, a)] = 1
+                    
+    print('Add finished')
     subfields.discard('OTHER')
     # Set labels for the nodes.
-    for a in counts:
-        fd = []
-        for f in subfields:
-            if counts[a][f] > 0:
-                fd.append(f)
-        if len(fd) > 0:
-            fields[a] = ','.join(fd)
-        else:
-            fields[a] = 'OTHER'
-    # Build the graph.
-    GA = nx.DiGraph()
-    GA.add_nodes_from(authors)
-    GA.add_edges_from(connections)
+    fields = get_author_fields(subfields, counts)
     nx.set_edge_attributes(GA, weights, 'weight')
     nx.set_node_attributes(GA, fields, 'field')
     return GA
 
 
-def main():
+def get_subfields(file_name):
     keyword_to_abbr = dict()
-    f = open('added_keywords.txt', 'r')
+    f = open(file_name, 'r')
     line = f.readline()
     while line != '':
         ln = line.split(':')
         keyword_to_abbr[ln[0][:-1]] = ln[1][1:-1]
         line = f.readline()
     f.close()
-    subfields = set(keyword_to_abbr.values())
+    return set(keyword_to_abbr.values())
+
+
+def get_labels(subfields, method):
     labels = []
-    for field in subfields:
-        n_labels = len(labels)
-        for j in range(n_labels):
-            labels.append(labels[j] + ',' + field)
-        labels.append(field)
-    subfields.add('OTHER')
+    if method == 1:
+        for i in range(1, len(subfields)):
+            labels = labels + list(combinations(subfields, i))
+        labels = [','.join(t) for t in labels]
+    elif method == 2:
+        for field in subfields:
+            n_labels = len(labels)
+            for j in range(n_labels):
+                labels.append(labels[j] + ',' + field)
+            labels.append(field)
+    else:
+        raise Exception('Incorrect method')
     labels.insert(0, 'OTHER')
+    return labels
+
+
+def main():
+    # subfields = get_subfields('added_keywords.txt')
+    subfields = {'GSO', 'GwSO', 'BA ', 'GSA', 'FA', 'ALO', 'KH', 'MBO', 'WOA',
+                 'CSO', 'ANT', 'CRO', 'PSO', 'CS', 'BeA', 'BA', 'FOA', 'BFO',
+                 'SFLA', 'ICA', 'WCA', 'FPA', 'BSO', 'IWO', 'TLBO', 'DE',
+                 'MFO', 'GWO', 'BeA ', 'FWA', 'BBBC', 'CSS'}
+    labels = get_labels(subfields, method=1)
+    subfields.add('OTHER')
 
     GA = author_citation_graph(subfields)
     e_to, e_from, e_w = to_from_w_labels(GA, labels)
@@ -410,4 +466,4 @@ def main():
     return
 
 
-main()
+#main()
