@@ -16,6 +16,80 @@ import xmltodict
 from mysql.connector.errors import DataError
 
 
+def remove_duplicate_references():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT eid, cites FROM publications')
+    data = mycursor.fetchall()
+    data_gen = (x for x in data)
+    del data, db_data
+    for row in data_gen:
+        cites = ','.join(set(row[1].split(',')))
+        if cites != row[1]:
+            mycursor.execute(f'UPDATE publications SET cites="{cites}" WHERE eid={row[0]}')
+            mydb.commit()
+            print(f'Updated {row[0]}')
+
+
+def strip_references():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT eid, cites FROM publications WHERE cites LIKE "0%"')
+    data = mycursor.fetchall()
+    for row in data:
+        refs = row[1].split(',')
+        refs = [eid.lstrip('0') for eid in refs]
+        mycursor.execute(f'UPDATE publications SET cites="{",".join(refs)}" WHERE eid={row[0]}')
+        mydb.commit()
+
+
+def get_smashed_refs():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT eid, cites FROM publications')
+    data = mycursor.fetchall()
+    f = open('to_correct_p.txt', 'w')
+    for row in data:
+        refs = row[1].split(',')
+        lengths = [len(eid) for eid in refs]
+        if max(lengths) > 11:
+            f.write(f'{row[0]}, ')
+    f.write('EOF')
+    f.close()
+
+
+def unsmash_refs():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT eid FROM publications')
+    pub_set = set(mycursor.fetchall())
+    f = open('to_correct_p.txt', 'r')  # Check the file name
+    file = f.readlines()
+    ids = file[0].split(', ')
+    ids.pop(-1)  # Remove End Of File string
+    updated_str = ''
+    for eid in ids:
+        mycursor.execute(f'SELECT cites FROM publications WHERE eid={eid}')
+        ref_str = mycursor.fetchall()[0][0]
+        refs = (x for x in ref_str.split(','))
+        for ref in refs:
+            if len(ref) > 11:
+                eid1 = ref[:11]
+                eid2 = ref[11:]
+                if (int(eid1),) in pub_set and (int(eid2),) in pub_set:
+                    updated_str = ref_str.replace(ref, f'{eid1},{eid2}')
+        if updated_str == '':
+            print(f'Double-check {eid}')
+        else:
+            mycursor.execute(f'UPDATE publications SET cites="{updated_str}" WHERE eid={eid}')
+            mydb.commit()
+            print(f'Corrected {eid}')
+
+
 def get_ids_to_correct(table):
     db_data = load(open('mydb_setup.json'))
     mydb = mysql.connector.connect(**db_data)
@@ -33,7 +107,7 @@ def get_ids_to_correct(table):
         mycursor.execute('SELECT id FROM authors')
         author_set = set(mycursor.fetchall())
         for row in data:
-            a_list = row[1].split(',')
+            a_list = (x for x in row[1].split(','))
             for authid in a_list:
                 if (int(authid),) not in author_set:
                     f.write(f'{row[0]}, ')
@@ -375,24 +449,22 @@ def merge_records(mydb, mycursor, idp, ida):
         if ids_ida == {''} or ids_idp == {''}:
             return
         for authid in ids_idp:
-            mycursor.execute(f'SELECT authname, given_name, aka FROM authors WHERE id={authid}')
+            mycursor.execute(f'SELECT authname, aka FROM authors WHERE id={authid}')
             author_info = mycursor.fetchall()[0]  # (authname, given_name, aka)
             try:
-                aka = author_info[2].split()
+                aka = author_info[1].split()
             except AttributeError:
                 aka = []
-            info_idp['authors'].update(
-                {normalize(author_info[0]): (authid, author_info[1], aka)})
+            info_idp['authors'].update({author_info[0]: (authid, aka)})
         # Get the information about the authors of publication with id ida.
         for authid in ids_ida:
-            mycursor.execute(f'SELECT authname, given_name, aka FROM authors WHERE id={authid}')
+            mycursor.execute(f'SELECT authname, aka FROM authors WHERE id={authid}')
             author_info = mycursor.fetchall()[0]  # (authname, given_name, aka)
             try:
-                aka = author_info[2].split(',')
+                aka = author_info[1].split(',')
             except AttributeError:
                 aka = []
-            info_ida['authors'].update(
-                {normalize(author_info[0]): (authid, author_info[1], aka)})
+            info_ida['authors'].update({author_info[0]: (authid, aka)})
         names_ida = set(info_ida['authors'].keys())
         names_idp = set(info_idp['authors'].keys())
         if names_ida != names_idp:
@@ -408,12 +480,12 @@ def merge_records(mydb, mycursor, idp, ida):
             if authid_ida == authid_idp:
                 continue
             else:
-                if authid_ida not in info_idp['authors'][name][2]:
+                if authid_ida not in info_idp['authors'][name][1]:
                     aliases[authid_idp] = [authid_ida] + \
-                        info_idp['authors'][name][2]
-                if authid_idp not in info_ida['authors'][name][2]:
+                        info_idp['authors'][name][1]
+                if authid_idp not in info_ida['authors'][name][1]:
                     aliases[authid_ida] = [authid_idp] + \
-                        info_ida['authors'][name][2]
+                        info_ida['authors'][name][1]
         # Merge authors.
         if len(aliases) != 0:
             for ala in aliases:
@@ -485,19 +557,21 @@ def merge_matching_title():
     info_publications = mycursor.fetchall()
     publication_titles, other_titles = dict(), dict()
     for ele in info_other:
-        other_titles[normalize(ele[1])] = {
+        other_titles[normalize(ele[0])] = {
             'date': str(ele[1]), 'source': ele[2], 'id': ele[3], 'doi': ele[4]}
     for ele in info_publications:
-        publication_titles[normalize(ele[1])] = {
+        publication_titles[normalize(ele[0])] = {
             'date': str(ele[1]), 'source': ele[2], 'eid': ele[3]}
-    overlap = list(set(publication_titles.keys()).intersection(set(other_titles.keys())))
+    overlap = list(set(
+        publication_titles.keys()).intersection(set(other_titles.keys())))
     # Introduce randomness to avoid repeatedly going over the same records
     shuffle(overlap)
     for ele in overlap:
         if other_titles[ele]['doi'] == '':
-            # Check if dates match.
-            year_and_month_match = (other_titles[ele]['date'][:-3] == publication_titles[ele]['date'][:-3])
-            if other_titles[ele]['date'] == 'None' or year_and_month_match:
+            # Check if year matches.
+            year_matches = (other_titles[ele]['date'][:4] ==
+                            publication_titles[ele]['date'][:4])
+            if other_titles[ele]['date'] == 'None' or year_matches:
                 merge_records(mydb, mycursor, publication_titles[ele]['eid'],
                               other_titles[ele]['id'])
             else:
@@ -505,6 +579,40 @@ def merge_matching_title():
                 print(other_titles[ele])
                 print(publication_titles[ele])
                 print('----------------------')
+
+
+def count_incomplete_title_matches():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT title, date FROM additional')
+    info_other = mycursor.fetchall()
+    mycursor.execute('SELECT title, date FROM publications')
+    info_publications = mycursor.fetchall()
+    publication_titles, other_titles = dict(), dict()
+    other_titles = set(normalize(ele[0]) for ele in info_other if ele[0] is not None)
+    publication_titles = set(normalize(ele[0]) for ele in info_publications)
+    overlap = publication_titles.intersection(other_titles)
+    titles_and_dates = dict()
+    for ele in info_other:
+        if ele[0] is not None:
+            title = normalize(ele[0])
+            if title in overlap:
+                if title in titles_and_dates:
+                    titles_and_dates[title]['o'].add(str(ele[1])[:4])
+                else:
+                    titles_and_dates[title] = {'o': {str(ele[1])[:4]}, 'p': set()}
+    for ele in info_publications:
+        title = normalize(ele[0])
+        if title in overlap:
+            titles_and_dates[title]['p'].add(str(ele[1])[:4])
+    # repeated_titles = set(x for x in titles_and_dates if len(titles_and_dates[x]['o']) + len(titles_and_dates[x]['p']) > 2)
+    # not_repeated = overlap.difference(repeated_titles)
+    pairs = []
+    for ele in overlap:
+        if titles_and_dates[ele]['p'].intersection(titles_and_dates[ele]['o']) == set() and titles_and_dates[ele]['o'] != {'None'}:
+            pairs.append(titles_and_dates[ele])
+    return pairs
 
 
 def get_initials(given_name):
@@ -559,6 +667,37 @@ def correct_author_names():
             mycursor.execute(f'UPDATE authors SET {update_string} WHERE id={row[0]}')
             mydb.commit()
             print(f'Updated {row[0]}')
+
+
+def correct_authnames():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT id, authname, surname, initials FROM authors WHERE initials LIKE "%.%.%" AND authname LIKE "%.%.%" and authname NOT LIKE "%-%"')
+    data = mycursor.fetchall()
+    shuffle(data)
+    for row in data:
+        authname = normalize(f'{row[2]} {row[3][0:2]}').title()
+        mycursor.execute(f'UPDATE authors SET authname="{authname}" WHERE id={row[0]}')
+        mydb.commit()
+    
+
+def correct_authnames_no_initials():
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT id, authname FROM authors where initials is NULL')
+    data = mycursor.fetchall()
+    shuffle(data)
+    gen = (row for row in data)
+    del data, db_data
+    for row in gen:
+        authname = normalize(f'{row[1]}').title()
+        if authname == row[1]:
+            continue
+        mycursor.execute(f'UPDATE authors SET authname="{authname}" WHERE id={row[0]}')
+        mydb.commit()
+        print(row[0])
 
 
 def correct_authors_from_file():
@@ -701,16 +840,14 @@ def title_metadata(title, authors, date=''):
                     except KeyError:
                         temp.update({'given_name': '',
                                      'initials': ''})
-                    authname = f"{temp['surname']} {temp['initials']}".strip()
-                    metadata['authors'].update({authname: temp})
+                    authname = f"{temp['surname']} {temp['initials'][0:2]}".strip()
+                    metadata['authors'].update({normalize(authname).title(): temp})
                 metadata['author_count'] = len(response[i]['author'])
             except KeyError:
                 metadata.clear()
                 continue
             # Check if authors match.
-            norm_authors = set(normalize(auth) for auth in authors)
-            norm_meta_authors = set(normalize(key) for key in metadata['authors'].keys())
-            if norm_authors != norm_meta_authors:
+            if authors != set(metadata['authors'].keys()):
                 metadata.clear()
                 break
             # Continue to next record if authors do not match.
@@ -790,8 +927,8 @@ def doi_metadata(doi):
             except KeyError:
                 temp.update({'given_name': '',
                              'initials': ''})
-            authname = f"{temp['surname']} {temp['initials']}".strip()
-            metadata['authors'].update({authname: temp})
+            authname = f"{temp['surname']} {temp['initials'][0]}.".strip()
+            metadata['authors'].update({normalize(authname).title(): temp})
         metadata['author_count'] = len(response['author'])
     except KeyError:
         metadata['author_count'] = 0
@@ -884,6 +1021,37 @@ def get_update_string(metadata, row, match_type):
     return string.strip(', ')
 
 
+def get_record_generator(mydb, mycursor, table, match_type):
+    if match_type == 'doi':
+        if table == 'additional':
+            mycursor.execute('SELECT title, doi, date, citedby, authors, '
+                             'source, id FROM additional WHERE doi != "" and '
+                             'authors = ""')
+        elif table == 'publications':
+            mycursor.execute('SELECT title, doi, date, citedby, authors, '
+                             'source, eid, abstract FROM publications WHERE '
+                             'doi != "" and (authors = "" or abstract = "")')
+        else:
+            raise Exception('Please choose a different table.')
+    elif match_type == 'title':
+        if table == 'publications':
+            mycursor.execute('SELECT title, doi, date, citedby, authors, '
+                             'source, eid, abstract FROM publications WHERE '
+                             'doi = "" and authors != "" and title != ""')
+        elif table == 'additional':
+            mycursor.execute('SELECT title, doi, date, citedby, authors,'
+                             ' source, id FROM additional WHERE title is NOT'
+                             ' NULL and authors != "" and doi = ""')
+        else:
+            raise Exception('Please choose a different table.')
+    else:
+        raise Exception('Please choose a different match_type.')
+    records = mycursor.fetchall()
+    # Introduce randomness to avoid repeatedly going over the same records
+    shuffle(records)
+    return (x for x in records)
+
+
 def fill_missing(table, match_type):
     """
     Fill missing info for records in additional table with a doi.
@@ -901,6 +1069,79 @@ def fill_missing(table, match_type):
     Information used to match on crossref. Either 'doi' or 'title'.
 
     """
+    db_data = load(open('mydb_setup.json'))
+    mydb = mysql.connector.connect(**db_data)
+    mycursor = mydb.cursor()
+    mycursor.execute('SELECT id FROM authors')
+    author_set = set(mycursor.fetchall())
+    records = get_record_generator(mydb, mycursor, table, match_type)
+    for row in records:
+        # Get metadata.
+        if match_type == 'doi':
+            metadata = doi_metadata(row[1])
+        else:
+            if row[2] is None:
+                date = ''
+            else:
+                date = row[2]
+            authors = set()
+            gen_list = (x for x in row[4].split(','))
+            for ele in gen_list:
+                mycursor.execute(f'SELECT authname from authors where id={ele}')
+                try:
+                    authors.add(mycursor.fetchall()[0][0])
+                except IndexError:
+                    #if table == 'publications':
+                    #    author_set = correct_record(mydb, mycursor, row[6], author_set)
+                    #    print(f'Corrected {row[6]}')
+                    #else:
+                    #    print(f'A{ele} in {row[6]}')
+                    #authors = set()
+                    break
+            if len(authors) != 0:
+                metadata = title_metadata(row[0], authors, date=date)
+            else:
+                metadata = {}
+        if len(metadata) == 0:
+            continue
+        # Prepare information to update via making a string.
+        string = get_update_string(metadata, row, match_type)
+        # Check if need to update authors.
+        if row[4] == '' and len(metadata['authors']) != 0:
+            data = load(open('save.json'))
+            authors, values_to_insert = [], []
+            gen_list = (a for a in metadata['authors'])
+            for author in gen_list:
+                author_info = metadata['authors'][author]
+                authid = data['auth_my']
+                data['auth_my'] += 1
+                authors.append(str(authid))
+                values_to_insert.append(
+                    (authid, author, author_info['surname'],
+                     author_info['given_name'], author_info['initials']))
+            if len(authors) != 0:
+                mycursor.executemany('INSERT INTO authors (id, authname,'
+                                     ' surname, given_name, initials) VALUES '
+                                     '(%s, %s, %s, %s, %s)', values_to_insert)
+                mydb.commit()
+                with open('save.json', 'w', encoding='utf8') as json_file:
+                    dump(data, json_file, ensure_ascii=False)
+                authors = ','.join(authors)
+                if string != '':
+                    string = f'{string}, authors="{authors}"'
+                else:
+                    string = f'authors="{authors}"'
+        # Update the record.
+        if len(string) != 0:
+            if table == 'additional':
+                mycursor.execute(f'UPDATE additional SET {string} WHERE id={row[6]}')
+            else:
+                mycursor.execute(f'UPDATE publications SET {string} WHERE eid={row[6]}')
+            mydb.commit()
+            print(f'Updated {row[6]}')
+
+
+def fill_missing_check(table, match_type):
     db_data = load(open('mydb_setup.json'))
     mydb = mysql.connector.connect(**db_data)
     mycursor = mydb.cursor()
@@ -933,7 +1174,10 @@ def fill_missing(table, match_type):
     records = mycursor.fetchall()
     # Introduce randomness to avoid repeatedly going over the same records
     shuffle(records)
+    records = set(records)
+    recs = set()
     for row in records:
+        recs.add(row)
         # Get metadata.
         if match_type == 'doi':
             metadata = doi_metadata(row[1])
@@ -943,17 +1187,12 @@ def fill_missing(table, match_type):
             else:
                 date = row[2]
             authors = set()
-            for ele in row[4].split(','):
+            gen_list = (x for x in row[4].split(','))
+            for ele in gen_list:
                 mycursor.execute(f'SELECT authname from authors where id={ele}')
                 try:
                     authors.add(mycursor.fetchall()[0][0])
                 except IndexError:
-                    if table == 'publications':
-                        author_set = correct_record(mydb, mycursor, row[6], author_set)
-                        print(f'Corrected {row[6]}')
-                    else:
-                        print(f'A{ele} in {row[6]}')
-                    authors = set()
                     break
             if len(authors) != 0:
                 metadata = title_metadata(row[0], authors, date=date)
@@ -967,7 +1206,8 @@ def fill_missing(table, match_type):
         if row[4] == '' and len(metadata['authors']) != 0:
             data = load(open('save.json'))
             authors, values_to_insert = [], []
-            for author in metadata['authors']:
+            gen_list = (a for a in metadata['authors'])
+            for author in gen_list:
                 author_info = metadata['authors'][author]
                 authid = data['auth_my']
                 data['auth_my'] += 1
@@ -994,7 +1234,7 @@ def fill_missing(table, match_type):
             else:
                 mycursor.execute(f'UPDATE publications SET {string} WHERE eid={row[6]}')
             mydb.commit()
-            print(f'Updated {row[6]}')
+    records = records.difference(recs)
 
 
 def main():
